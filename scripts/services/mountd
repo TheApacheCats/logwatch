@@ -1,0 +1,124 @@
+
+##########################################################################
+# $Id: mountd,v 1.19 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+#####################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':ip';
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   if ( ($ThisLine =~ /^Unauthorized access by NFS client .*$/ ) or
+         ($ThisLine =~ /^NFS client [^ ]+ tried to access .*$/ ) or
+         ($ThisLine =~ /^[^ ]* exported to both [0-9.]*\/[0-5]* and [0-9.]*\/[0-9]/) ) {
+      # don't care about this, as the next line reports the IP again
+   }
+   elsif ( ($IP,$Mount) = ($ThisLine =~ /^Blocked attempt of (\d+\.\d+\.\d+\.\d+) to mount (.*)$/) ) {
+      $Name = LookupIP ($IP);
+      $Mount = "      " . $Mount;
+      $Rejected{$Name}{$Mount}++;
+   }
+   elsif ( ($Name,$Mount) = ($ThisLine =~ /^refused mount request from (.+) for ([^ ]+)/) ) {
+      $Mount = "      " . $Mount;
+      $Rejected{$Name}{$Mount}++;
+   }
+   elsif ( ($Mount) = ($ThisLine =~ /can.t stat exported dir (.*): No such file or directory/) ) {
+      $Mount = "      " . $Mount;
+      $NotFound{$Mount}++;
+   }
+   elsif ( ($Mount,$IP) = ($ThisLine =~ /^NFS mount of (.*) attempted from (\d+\.\d+\.\d+\.\d+) $/) ) {
+      $Name = LookupIP ($IP);
+      $Mount = "      " . $Mount;
+      $Attempted{$Name}{$Mount}++;
+   }
+   elsif ( ($Name) = ($ThisLine =~ /^authenticated (?:un)?mount request from ([\w:]+)/) ) {
+      $Mount = "      unknown";
+      $Mounted{$Name}{$Mount}++;
+   }
+   elsif ( ($Mount,$IP) = ($ThisLine =~ /^(.*) has been mounted by (\d+\.\d+\.\d+\.\d+) $/) ) {
+      $Name = LookupIP ($IP);
+      $Mount = "      " . $Mount;
+      $Mounted{$Name}{$Mount}++;
+   }
+   elsif ( ($Number) = ($ThisLine =~ /Caught signal ([0-9]*), un-registering and exiting/) ) {
+      $SignalExit{$Number}++;
+   }
+   else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if (keys %Rejected) {
+   print "\nRefused NFS mount attempts:\n";
+   foreach $ThisOne (keys %Rejected) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Rejected{$ThisOne}}) {
+         print $ThatOne . ': ' . $Rejected{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NotFound) {
+   print "\nAttemts to mount nonexisting files or directories:\n";
+   foreach $ThisOne (keys %NotFound) {
+      print "   " . $ThisOne .":" . $NotFound{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %SignalExit) {
+   printf "\nExit after catching signal:\n";
+   foreach $Number (keys %SignalExit) {
+      print "   Signal " . $Number. ": " . $SignalExit{$Number} . " Time(s)\n";
+   }
+}
+
+if (($Detail >= 5) and (keys %Mounted)) {
+   print "\nSuccessful NFS mounts:\n";
+   foreach $ThisOne (keys %Mounted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Mounted{$ThisOne}}) {
+         print $ThatOne . ': ' . $Mounted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (($Detail >= 10) and (keys %Attempted)) {
+   print "\nAttempted NFS mounts:\n";
+   foreach $ThisOne (keys %Attempted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Attempted{$ThisOne}}) {
+         print $ThatOne . ': ' . $Attempted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

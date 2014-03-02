@@ -1,0 +1,169 @@
+###########################################################################
+# $Id$
+###########################################################################
+# $Log$
+#
+###########################################################################
+
+###########################################################################
+# zz-zfs: Output states of ZFS pools and datasets
+#
+#       Detail Levels:
+#        0: Output list of pools and capacities
+#        5: Output full pool status (automatic if any pools are not healthy)
+#
+###########################################################################
+
+#######################################################
+## Copyright 2011 Cloyce D. Spradling
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use strict;
+use vars qw($logwatch_hostname $DebugCounter);
+use POSIX;
+
+# Keep the pipes hot
+$| = 1;
+
+$ENV{PRINTING} = "y";
+
+my $debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+my $detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || $ENV{'zfs_detail'} || 0;
+
+my ($os_name, $host, $os_release, $version, $machine) = POSIX::uname();
+
+# Check to see if we should even be looking at this...
+$host =~ s/\..*//;  # Trim domain (if any)
+if ($ENV{'LOGWATCH_ONLY_HOSTNAME'} && ($logwatch_hostname ne $host)) {
+  exit 0;
+}
+
+my $pathto_zpool = $ENV{'pathto_zpool'} || '/usr/sbin/zpool';
+my $pathto_zfs   = $ENV{'pathto_zfs'}   || '/usr/sbin/zfs';
+my $summary_only = $ENV{'summary_only'} || ($detail < 5);
+my $detail_only  = $ENV{'detail_only'}  || 0;
+
+if (!-x $pathto_zpool) {
+   # Doesn't support ZFS
+   exit 0;
+}
+
+if ( $debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside zz-zfs\n\n";
+    $DebugCounter = 1;
+}
+
+my @pools = ();
+my %poolinfo = ();
+my %counts = ( 'mounted'    => 0,
+               'filesystem' => 0,
+               'snapshot'   => 0,
+               'volume'     => 0,
+             );
+my $total_pools = 0;
+
+# Table for converting things to kibibytes
+my %units = ( 'P' => 1024 * 1024 * 1024 * 1024,
+              'T' => 1024 * 1024 * 1024,
+              'G' => 1024 * 1024,
+              'M' => 1024,
+              'K' => 1,
+            );
+my $unit_re = '['.join('', keys %units).']';
+
+# Discover the pools
+open POOLS, '-|', $pathto_zpool, qw(list -H -o name,size,allocated,free,dedupratio,capacity,health) or die "Error running 'zpool list': $!\n";
+while(<POOLS>) {
+   chomp;
+   my ($name, $size, $used, $avail, $dedup, $cap, $health) = split(/\s+/);
+   next unless $name ne '';
+   $size = convert_to_kb($size);
+   $used = convert_to_kb($used);
+   $avail = convert_to_kb($avail);
+   print STDERR "\nPOOLS: \"$_\" name=\"$name\" size=$size used=$used avail=$avail dedup=$dedup cap=\"$cap\" health=\"$health\"\n" if ($debug);
+   push @pools, [ $name, $size, $used, $avail, $dedup, $cap, $health ];
+}
+close(POOLS);
+
+exit 0 unless @pools;   # Nothing to do?
+
+# Read filesystem information for each pool
+foreach my $type (qw( filesystem volume snapshot ) ) {
+   foreach my $pool (map { $_->[0] } @pools) {
+      open POOLINFO, '-|', $pathto_zfs, qw(list -H -t), $type, qw(-o name,referenced,available,mountpoint -r), $pool or die "Error running 'zfs list': $!\n";
+      while(<POOLINFO>) {
+         next if /no datasets available/i;
+         chomp;
+         my ($name, $used, $avail, $mountpoint) = split(/\s+/);
+         next unless $name ne '';
+         $used = convert_to_kb($used);
+         $avail = convert_to_kb($avail);
+         print STDERR "\nPOOLINFO: \"$_\" name=\"$name\" used=$used avail=$avail mountpoint=\"$mountpoint\"\n" if ($debug);
+         push @{$poolinfo{$pool}->{$type}}, [ $name, $used, $avail, $mountpoint ];
+         $counts{$type}++;
+         $counts{'mounted'}++ if ($type eq 'filesystem' && $mountpoint ne 'none');
+      }
+      close(POOLINFO)
+   }
+}
+
+print "Total ZFS pools:   ".(@pools+0)."\n";
+print "Total filesystems: $counts{'filesystem'} ($counts{'mounted'} mounted)\n";
+print "Total snapshots:   $counts{'snapshot'}\n";
+print "Total volumes:     $counts{'volume'}\n";
+
+
+if (!$detail_only) {
+   my $pool_format = "%2s%-15s  %-10s  %-10s  %-10s  %-10s  %s\n";
+   print "\n------------------- ZFS Pool Summary -------------------\n\n";
+   printf $pool_format, '', 'Pool Name', 'Size (MiB)', 'Used (MiB)', 'Free (MiB)', 'Dedup', '';
+   foreach my $poolref (@pools) {
+      my ($name, $size, $used, $avail, $dedup, $cap, $health) = @{$poolref};
+      my $badflag = ($health eq 'ONLINE') ? '' : '!!';
+      $detail = 1000 if $badflag ne '';	# Show status if something's wrong
+      printf $pool_format, $badflag, $name, convert_to_mb($size, 10), convert_to_mb($used, 10), convert_to_mb($avail, 10), $dedup, $cap;
+   }
+   print "\n--------------------------------------------------------\n\n";
+}
+
+if (!$summary_only || $detail > 999) {
+   print "\n------------------- ZFS Pool Status -------------------\n\n";
+   foreach my $pool (map { $_->[0] } @pools) {
+      system $pathto_zpool, 'status', $pool;
+   }
+   print "\n-------------------------------------------------------\n\n";
+}
+
+sub convert_to_kb {
+   my ($val) = @_;
+
+   my ($num, $unit) = ($val =~ /([\.\d]+)\s*($unit_re)?/io);
+   return 0 if $num eq '';
+   $unit = uc($unit);
+
+   return $num * $units{$unit};
+}
+
+sub convert_to_mb {
+   my ($kb, $width) = @_;
+   $width = 0 unless defined($width);
+
+   $kb /= 1024;
+   $kb = int(($kb * 10) + 0.5) / 10;
+
+   return sprintf '%*.1f', $width, $kb;
+}
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et

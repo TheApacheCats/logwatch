@@ -1,0 +1,205 @@
+
+##########################################################################
+# $Id: kernel,v 1.35 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+# $Log: kernel,v $
+# Revision 1.35  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.34  2008/02/14 19:01:51  mike
+# Patch for OOM from Orion Poplawski -mgt
+#
+# Revision 1.33  2006/01/16 18:40:31  kirk
+# fixed name to Logwatch (how I like it now)
+#
+# Revision 1.32  2005/11/30 05:35:11  bjorn
+# Replaced compStr, by Markus Lude.
+#
+# Revision 1.31  2005/11/08 20:34:49  bjorn
+# Fixed reporting of RAID errors and added 'use strict'. Adds support for
+# reporting various execution/memory access errors. These are errors on
+# 2.6.5-7 kernels, x86_64 and IA64 architectures, SuSE 9 distro.
+# All these changes by David Baldwin.
+#
+# Revision 1.30  2005/07/25 22:17:31  bjorn
+# Moved iptables (and ipchains, ipfwadm) code to its own service (iptables).
+#
+# Revision 1.29  2005/06/07 18:14:50  bjorn
+# Filtering out audit statements, since we now have an "audit" service.
+##########################################################################
+# Kernel script for Logwatch
+#
+# Visit the Logwatch website at
+#   http://www.logwatch.org
+##########################################################################
+
+#####################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use strict;
+use Logwatch ':ip';
+
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+my $Ignore_faults = $ENV{'ignore_faults'};
+my %SYNflood = ();
+my %RAIDErrors = ();
+my %SegFaults = ();
+my %GPFaults = ();
+my %UnalignedErrors = ();
+my %FPAssists = ();
+my %OOM = ();
+my %Errors = ();
+my %Kernel = ();
+
+while (defined(my $ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   next if ($ThisLine eq '');
+   # Remove timestamp if present
+   $ThisLine =~ s/^\[\s*\d+\.\d+\]\s*//;
+
+   if (
+      # filter out audit messages - these should be parsed by the audit
+      # service
+      ($ThisLine =~ /^\s*(type=\d+\s+)?audit\(/)
+      # following now in iptables service
+      or ($ThisLine =~ /^Packet log: .*PROTO=/)
+      or ($ThisLine =~ /IN=.*OUT=.*SRC=.*DST=.*PROTO=/)
+      ) { # ignore the above strings
+   } elsif ( my ($from,$on) = ( $ThisLine =~ /^Warning: possible SYN flood from ([^ ]+) on ([^ ]+):.+ Sending cookies/ ) ) {
+      my $Fullfrom = LookupIP($from);
+      my $Fullon = LookupIP($on);
+      $SYNflood{$Fullon}{$Fullfrom}++;
+   } elsif ($ThisLine =~ /continuing in degraded mode/) {
+      $RAIDErrors{$ThisLine}++;
+   } elsif ($ThisLine =~ /([^(]*)\[\d+\]: segfault at/) {
+      $SegFaults{$1}++;
+   } elsif ($ThisLine =~ /([^(]*)\[\d+\] general protection/) {
+      $GPFaults{$1}++;
+   } elsif ($ThisLine =~ /([^(]*)\(\d+\): unaligned access to/) {
+      $UnalignedErrors{$1}++;
+   } elsif ($ThisLine =~ /([^(]*)\(\d+\): floating-point assist fault at ip/) {
+      $FPAssists{$1}++;
+   } elsif ($ThisLine =~ /Out of memory: Killed process \d+ \((.*)\)/) {
+      $OOM{$1}++
+   } elsif ( ( my $errormsg ) = ( $ThisLine =~ /(.*?[Ee]rror.{0,17})/ ) ) {
+      # filter out smb open/read errors cased by insufficient permissions
+      my $SkipError = 0;
+      $SkipError = 1 if $ThisLine =~ /smb_readpage_sync: .*open failed, error=-13/;
+      $SkipError = 1 if $ThisLine =~ /smb_open: .* open failed, result=-13/;
+      $SkipError = 1 if $ThisLine =~ /smb_open: .* open failed, error=-13/;
+      # filter out error_exit in stack traces caused by OOM conditions
+      $SkipError = 1 if $ThisLine =~ /\[<[\da-f]+>\] error_exit\+0x/;
+      $Errors{$errormsg}++ if ( (! $SkipError) || ($Detail > 8));
+   }
+   # OTHER
+   else {
+      # XXX For now, going to ignore all other kernel messages as there
+      # XXX are practically an infinite number and most of them are obviously
+      # XXX not parsed here at this time.
+      # filter out smb open/read errors cased by insufficient permissions
+      my $SkipError = 0;
+      $SkipError = 1 if $ThisLine =~ /smb_readpage_sync: .*open failed, error=-13/;
+      $SkipError = 1 if $ThisLine =~ /smb_open: .* open failed, result=-13/;
+      $SkipError = 1 if $ThisLine =~ /smb_open: .* open failed, error=-13/;
+      $Kernel{$ThisLine}++ if ( (! $SkipError) || ($Detail > 8)) ;
+   }
+}
+
+if (keys %SYNflood) {
+   print "\nWarning: SYN flood on:\n";
+   foreach my $ThisOne (sort {$a cmp $b} keys %SYNflood) {
+      print "   " . $ThisOne . " from:\n";
+      foreach my $Next (sort {$a cmp $b} keys %{$SYNflood{$ThisOne}}) {
+         print "      " . $Next . ": $SYNflood{$ThisOne}{$Next} Time(s)\n";
+      }
+   }
+}
+
+if (keys %RAIDErrors) {
+   print "\nWARNING:  RAID Errors Present\n";
+   foreach my $Thisone ( sort {$a cmp $b} keys %RAIDErrors ) {
+      print "   $Thisone ...:  $RAIDErrors{$Thisone} Time(s)\n";
+   }
+}
+
+if (keys %SegFaults) {
+   my $header_printed=0;
+   foreach my $Thisone ( sort {$a cmp $b} keys %SegFaults ) {
+      if ($Ignore_faults =~ /\b\Q$Thisone\E\b/i) { next; }
+      if (!$header_printed) {
+         print "\nWARNING:  Segmentation Faults in these executables\n";
+         $header_printed=1;
+      }
+      print "   $Thisone :  $SegFaults{$Thisone} Time(s)\n";
+   }
+}
+
+if (keys %GPFaults) {
+   my $header_printed=0;
+   foreach my $Thisone ( sort {$a cmp $b} keys %GPFaults ) {
+      if ($Ignore_faults =~ /\b\Q$Thisone\E\b/i) { next; }
+      if (!$header_printed) {
+         print "\nWARNING:  General Protection Faults in these executables\n";
+         $header_printed=1;
+      }
+      print "   $Thisone :  $GPFaults{$Thisone} Time(s)\n";
+   }
+}
+
+if (keys %UnalignedErrors) {
+   print "\nWARNING:  Unaligned Errors in these executables\n";
+   foreach my $Thisone ( sort {$a cmp $b} keys %UnalignedErrors ) {
+      print "   $Thisone :  $UnalignedErrors{$Thisone} Time(s)\n";
+   }
+}
+
+if (keys %FPAssists) {
+   print "\nWARNING:  Floating-Point Assists in these executables\n";
+   foreach my $Thisone ( sort {$a cmp $b} keys %FPAssists ) {
+      print "   $Thisone :  $FPAssists{$Thisone} Time(s)\n";
+   }
+}
+
+if (keys %OOM) {
+   print "\nWARNING:  Out of memory killer killed these executables\n";
+   foreach my $Thisone ( sort {$a cmp $b} keys %OOM ) {
+      print "   $Thisone :  $OOM{$Thisone} Time(s)\n";
+   }
+}
+
+if (keys %Errors) {
+   print "\nWARNING:  Kernel Errors Present\n";
+   foreach my $Thisone ( sort {$a cmp $b} keys %Errors ) {
+      print "   $Thisone ...:  $Errors{$Thisone} Time(s)\n";
+   }
+}
+
+# OTHER
+if ( ($Detail >= 5) and (keys %Kernel) ) {
+   print "\n";
+   foreach my $ThisOne (sort {$a cmp $b} keys %Kernel) {
+      print $Kernel{$ThisOne} . " Time(s): " . $ThisOne . "\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

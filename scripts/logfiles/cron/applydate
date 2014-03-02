@@ -1,0 +1,74 @@
+
+#use strict;
+##########################################################################
+# $Id: applydate,v 1.16 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use POSIX qw(strftime);
+use Logwatch ':dates';
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+
+
+# SearchDate2 is for newer crond (i.e. RH7.X)
+my ($SearchDate, $SearchDate2, $ThisLine);
+my ($incount, $outcount) = (0, 0);
+my $time = time;
+my $hostname = $ENV{'HOSTNAME'};
+my $OSname = $ENV{'OSname'};
+
+$SearchDate = TimeFilter("%m/%d-%H:%M:%S");
+$SearchDate2 = TimeFilter("%b %e %H:%M:%S");
+
+if ($Debug > 5) {
+   print STDERR "DEBUG: Inside ApplyDate (cron)...\n";
+   print STDERR "DEBUG: Looking For: $SearchDate or $SearchDate2\n";
+}
+
+while (defined($ThisLine = <STDIN>)) {
+   $incount++;
+   #Solaris & IRIX CRON filter -mgt
+   #Basically takes the cron format in /var/cron/log and makes it look like syslog
+   if ( $OSname =~ /(SunOS|IRIX)/ ) {
+      if ($ThisLine =~ m/^\>\s+CMD: (.+)$/o) {
+         my $command = $1;
+         my $nextline = <STDIN>;
+         my ($user, $ps, $datestamp) = $nextline =~ /^\>\s+(\w+) (\d+) . \w\w\w (\w\w\w\s+\d+ \d\d:\d\d:\d\d)/;
+         $ThisLine = "$datestamp $hostname CROND[$ps]: ($user) CMD ($command)\n";
+      }
+   }
+   if ($ThisLine =~ m/^[^ ]+ \($SearchDate-[0123456789]+\) /o) {
+      print $ThisLine;
+      $outcount++;
+   } elsif ($ThisLine =~ m/^$SearchDate2 [^ ]+ [\w\/]+\[\d+\]:/o) {
+      print $ThisLine;
+      $outcount++;
+   }
+}
+
+if ($Debug > 5) {
+   print STDERR "DEBUG: ApplyDate (cron): $incount Lines In, $outcount Lines Out\n";
+}
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

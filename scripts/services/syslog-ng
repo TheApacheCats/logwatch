@@ -1,0 +1,386 @@
+###########################################################################
+# $Id: syslog-ng,v 1.5.1.1 2011/01/06 21:32:01 general Exp $
+###########################################################################
+
+###########################################################################
+# This was written and is maintained by:
+#    Stefan Jakobs <logwatch at localside.net>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to logwatch at localside.net.
+###########################################################################
+# Copyright (c) 2008-2010 Stefan Jakobs
+# Covered under the included MIT/X-Consortium License:
+#    http://www.opensource.org/licenses/mit-license.php
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+###########################################################################
+
+#use warnings;
+use strict;
+
+my $Detail 	= $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+my $Version	= "1.2-20110106";
+
+# initialize logwatch variables 
+my $ThisLine	= "";
+my %OtherList 	= ();
+
+# initialize variables which save the stats
+my ($Starts,$Stops,$Reloads)	= ( 0, 0, 0);
+my ($Perms,$FileOpenErrors)	= ( 0, 0);
+my ($Drops, $BrokenConnsSum, $WriteErrsSum)	= ( 0, 0, 0);
+my ($Exceed_Conns)	= ( 0);
+my (%BrokenConns, %PermFiles, %OpenFiles)	= ( (), (), ());
+my (%WriteErrs)	= ();
+my (%Stats_center, %Stats_source, %Stats_dest)	= ( (), (), ());
+my (%Stats_dropped, %Stats_supp, %Stats_global)	= ( (), (), ());
+my (%Stats_dropped_net, %Stats_supp_net)	= ( (), ());
+my (%Warnings) = ();
+
+### Parse the lines ###
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+
+   #TD syslog-ng[2351]: New configuration initialized;
+   if ($ThisLine =~ /^New configuration initialized/ ) {
+      #ignore
+   }
+
+   #TD syslog-ng[9754]: Changing permissions on special file /dev/xconsole
+   elsif ($ThisLine =~ /^Changing permissions on special file ((\/[a-zA-Z0-9_]*)*)$/) {
+      %PermFiles = (%PermFiles, $1 => $PermFiles{$1}+1);
+      $Perms++;
+   }
+
+   #TD syslog-ng[9754]: Cannot open file /tmp/.adir/afile for writing (No such file or directory)
+   elsif ($ThisLine =~ /^Cannot open file ((\/[a-zA-Z0-9_.]*)*) .*/) {
+      # $1 fq file name, $2 only filename
+      %OpenFiles = (%OpenFiles, $1 => $OpenFiles{$1}+1);
+      $FileOpenErrors++;
+   }
+
+   #TD syslog-ng[9754]: SIGHUP received, restarting syslog-ng
+   #TD syslog-ng[4027]: Configuration reload request received, reloading configuration;
+   elsif ($ThisLine =~ /^SIGHUP received, restarting syslog-ng$/ ||
+      $ThisLine =~ /^Configuration reload request received, reloading configuration;/) {
+      $Reloads++;
+   }
+
+   #TD syslog-ng[9754]: new configuration initialized
+   elsif ($ThisLine =~ /^new configuration initialized$/) {
+      # happens with reload, but it's not for extra accounting
+   }
+
+   #TD syslog-ng[9754]: syslog-ng version 1.6.2 starting
+   #TD syslog-ng[3956]: syslog-ng starting up; version='2.0.9'
+   elsif ($ThisLine =~ /^syslog-ng version [\d.]+ starting$/ ||
+      $ThisLine =~ /^syslog-ng starting up; version='[\d.]+'$/) {
+      $Starts++;
+   }
+
+   #TD syslog-ng[9754]: syslog-ng version 1.6.2 going down
+   #TD syslog-ng[20043]: syslog-ng shutting down; version='2.0.9'
+   elsif ($ThisLine =~ /^syslog-ng version [\d.]+ going down$/ ||
+      $ThisLine =~ /^syslog-ng shutting down; version='[\d.]+'$/) {
+      $Stops++;
+   }
+
+   #TD syslog-ng[20043]: Termination requested via signal, terminating;
+   elsif ($ThisLine =~ /^Termination requested via signal, terminating;/) {
+      # happens with shutdown, but it's not for extra accounting
+   }
+
+   # syslog-ng v1.X
+   #TD syslog-ng[4833]: STATS: dropped 0
+   elsif ($ThisLine =~ /^STATS: dropped ([0-9]*)$/) {
+      if ($1 != 0) { $Drops = $Drops + $1; }
+   }
+
+   #TD syslog-ng[4833]: Connection broken to AF_INET(XXX.YYY.ZZZ.AAA:BBB), reopening in 60 seconds
+   elsif ($ThisLine =~ /^Connection broken to [A-Z_]*\((([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5})\), reopening in [0-9]* seconds$/) {
+      $BrokenConns{$1}++;
+      $BrokenConnsSum++;
+   }
+
+   #TD syslog-ng[4869]: io.c: do_write: write() failed (errno 111), Connection refused
+   elsif ($ThisLine =~ /^io\.c: do_write: write\(\) failed \(errno ([\d]+)\)/) {
+      $WriteErrs{$1}++;
+      $WriteErrsSum++;
+   } 
+
+   # Log statistics from syslog-ng v2.X
+   #TD syslog-ng[4883]: Log statistics; dropped='program(/path/to/p)=12', 
+   #	processed='center(queued)=1717', processed='center(received)=916', ...
+   #	suppressed='program(/path/to/p)=0'
+   # Log statisctics from syslog-ng v3.X
+   #TD syslog-ng[1625]: Log statistics; processed='destination(newsnotice)=0',
+   #     processed='center(queued)=0', processed='src.internal(src#0)=7',
+   #     stamp='src.internal(src#0)=1283808150', processed='global(msg_clones)=0', ...
+   elsif ($ThisLine =~ /^Log statistics; /) {
+      my @processed = 
+	  $ThisLine =~ /processed='([a-z.]*)\((\S*)\)=([0-9]*)'/g;
+      for (my $i=0; $i<@processed; $i=$i+3)
+      {
+	  if ($processed[$i] eq "center") { 
+	     $Stats_center{$processed[$i+1]} = 
+		$Stats_center{$processed[$i+1]} + $processed[$i+2]; 
+	  } elsif ($processed[$i] eq "destination") {
+	     $Stats_dest{$processed[$i+1]} = 
+		$Stats_dest{$processed[$i+1]} + $processed[$i+2];
+	  } elsif ($processed[$i] eq "source" || $processed[$i] eq "src.internal") {
+	     $Stats_source{$processed[$i+1]} = 
+		$Stats_source{$processed[$i+1]} + $processed[$i+2];
+          } elsif ($processed[$i] eq "global") {
+             $Stats_global{$processed[$i+1]} =
+                $Stats_global{$processed[$i+1]} + $processed[$i+2];
+	  } else { chomp($ThisLine); $OtherList{$ThisLine}++; }  
+      }
+      my @dropped =
+	  $ThisLine =~ /dropped='([a-z]*)\((\S*)\)=([0-9]*)'/g;
+      for (my $i=0; $i<@dropped; $i=$i+3)
+      {
+	  if ($dropped[$i] eq "program" || $dropped[$i] eq "pipe") {
+	     if ($dropped[$i+2] > 0) {
+		$Stats_dropped{$dropped[$i+1]} =
+		   $Stats_dropped{$dropped[$i+1]} + $dropped[$i+2];
+	     }
+	  } elsif ($dropped[$i] eq "tcp" || $dropped[$i] eq "udp") {
+	     if ($dropped[$i+2] > 0) {
+		$Stats_dropped_net{$dropped[$i+1]} =
+		   $Stats_dropped_net{$dropped[$i+1]} + $dropped[$i+2];
+	     }
+	  } else { chomp($ThisLine); $OtherList{$ThisLine}++; }
+      }   
+      my @suppressed =
+	  $ThisLine =~ /suppressed='([a-z]*)\((\S*)\)=([0-9]*)'/g;
+      for (my $i=0; $i<@suppressed; $i=$i+3)
+      {
+	  if ($suppressed[$i] eq "program" || $suppressed[$i] eq "pipe") {
+	     if ($suppressed[$i+2] > 0) {
+		$Stats_supp{$suppressed[$i+1]} =
+		   $Stats_supp{$suppressed[$i+1]} + $suppressed[$i+2];
+	     }
+	  } elsif ($suppressed[$i] eq "tcp" || $suppressed[$i] eq "udp") {
+	     if ($suppressed[$i+2] > 0) {
+		$Stats_supp_net{$suppressed[$i+1]} =
+		   $Stats_supp_net{$suppressed[$i+1]} + $suppressed[$i+2];
+	     }
+	  } else { chomp($ThisLine); $OtherList{$ThisLine}++; }
+      }
+   }
+
+   # syslog-ng v2.X
+   #TD syslog-ng[1796]: Number of allowed concurrent connections exceeded; num='10', max='10'  
+   elsif ($ThisLine =~ /^Number of allowed concurrent connections exceeded/) {
+      $Exceed_Conns++;
+   }
+
+   # syslog-ng v3.X
+   #TD syslog-ng[1601]: WARNING: global: the default value of chain_hostnames is changing to
+   #     'no' in version 3.0, please update your configuration accordingly;
+   #TD syslog-ng[1601]: WARNING: you are using the pipe driver, underlying file is not a
+   #     FIFO, it should be used by file(); filename='/dev/tty10'
+   elsif ($ThisLine =~ /^WARNING: (.*)$/) {
+      $Warnings{$1}++;
+   }
+   # syslog-nb v3.X
+   #TD syslog-ng[1601]: Configuration file has no version number, assuming ...
+   elsif ($ThisLine =~ /(Configuration file has no version number)/) {
+      $Warnings{$1}++;
+   }
+
+   else {
+      # Report any unmatched entries...
+      chomp($ThisLine);
+      $OtherList{$ThisLine}++;
+   }
+}
+
+### generate the output ###
+
+if ($Starts) {
+    printf "\nSyslog-ng started:\t\t%5i Time(s)", $Starts;
+}
+
+if ($Stops) {
+    printf "\nSyslog-ng stopped:\t\t%5i Time(s)", $Stops;
+}
+
+if ($Reloads) {
+    printf "\nSyslog-ng reloaded:\t\t%5i Time(s)", $Reloads;
+}
+if ($Starts || $Stops || $Reloads) { print "\n"; }
+
+if ($Perms) {
+    if ($Detail >= 5) {
+        print "\nSyslog-ng changed the permission on the file(s):";
+        foreach my $file (keys %PermFiles) {
+ 	    printf "\n\t$file\t\t%5i Time(s)", $PermFiles{$file};
+	}
+	print "\n";
+    } else {
+	print "\nSyslog-ng changed $Perms time(s) permission on file(s)\n";
+    }
+}
+
+if ($FileOpenErrors) {
+    if ($Detail >= 5) {
+        print "\nSyslog-ng could not open the file(s):";
+        foreach my $file (keys %OpenFiles) {
+            printf "\n\t$file\t\t%5i Time(s)", $OpenFiles{$file};
+        }
+	print "\n";
+    } else {
+	printf "\nSyslog-ng could not open file:\t%5i Time(s)", $FileOpenErrors;
+    }
+}
+
+if (keys %BrokenConns) {
+    if ($Detail >= 5) {
+        print "\nBroken connection(s) to:";
+        foreach my $IP (keys %BrokenConns) {
+            printf "\n\t%-21s\t%5i Time(s)", $IP, $BrokenConns{$IP}; 
+        }
+	print "\n";
+    } else {
+        printf "\nBroken connection(s):\t\t%5i Time(s)\n", $BrokenConnsSum;
+    }
+}
+
+if (keys %WriteErrs) {
+    if ($Detail >= 5) {
+        print "\nWrite Error(s):";
+        foreach my $err (keys %WriteErrs) {
+            printf "\n\tError Number %3i:\t%5i Time(s)", $err, $WriteErrs{$err};
+        }
+        print "\n";
+    } else {
+        printf "\nWrite Error(s): \t\t%5i Time(s)\n", $WriteErrsSum;
+    }
+}
+
+if ($Exceed_Conns && $Detail >= 5) {
+    printf "\nConcurrent Connections Exceeded:%3i Time(s)\n", $Exceed_Conns;
+}
+
+if (keys %Stats_center || keys %Stats_dest || keys %Stats_source ||
+	keys %Stats_dropped || keys %Stats_supp || keys %Stats_global ) {
+    my ($lost_rcvd, $lost_dest) = ( 0, 0);
+
+    if ($Stats_center{received} && %Stats_source) {
+	$lost_rcvd = 0 - $Stats_center{received};
+	map { $lost_rcvd = $lost_rcvd + $Stats_source{$_} } keys %Stats_source;
+    }
+    if ($Stats_center{queued} && %Stats_dest) {
+	$lost_dest = $Stats_center{queued};
+	map { $lost_dest = $lost_dest - $Stats_dest{$_} } keys %Stats_dest;
+    }
+
+    if ($Detail >= 6) { print "\nLog Statistics:"; }
+    if ($lost_rcvd != 0 || $lost_dest != 0) {
+	if ($lost_rcvd != 0) { 
+	   if ($Detail >= 5) { 
+	       print "\n- Failed to receive $lost_rcvd message(s)!"; 
+	   }
+	}
+	if ($lost_dest != 0) {
+	   if ($Detail >= 5 ) {
+	       print "\n- Failed to save $lost_dest message(s) in logfile(s)!";
+	   } else { $Drops = $Drops +  $lost_dest; }
+	}
+	if ($Detail >= 5) { print "\n"; }
+    }
+
+    if ($Detail >= 6) {
+	if (keys %Stats_center) {
+	   print "\nCenter:";
+	   foreach my $center (sort {$a cmp $b} keys %Stats_center) {
+		printf "\n\t%-30s %12i", $center, $Stats_center{$center};
+	   }
+	}
+	if (keys %Stats_dest) {
+	   print "\nDestination:";
+           foreach my $dest (sort {$a cmp $b} keys %Stats_dest) {
+                printf "\n\t%-30s %12i", $dest, $Stats_dest{$dest};
+           }
+        }
+        if (keys %Stats_source) {
+           print "\nSource:";
+           foreach my $source (sort {$a cmp $b} keys %Stats_source) {
+                printf "\n\t%-30s %12i", $source, $Stats_source{$source};
+           }
+        }
+        if (keys %Stats_supp) {
+           print "\nSuppressed:";
+           foreach my $source (sort {$a cmp $b} keys %Stats_supp) {
+                printf "\n\t%-30s %12i", $source, $Stats_supp{$source};
+           }
+        }
+        if (keys %Stats_supp_net) {
+           print "\nSuppressed(net):";
+           foreach my $source (sort {$a cmp $b} keys %Stats_supp_net) {
+                printf "\n\t%-30s %12i", $source, $Stats_supp_net{$source};
+           }
+        }
+        if (keys %Stats_dropped) {
+           print "\nDropped:";
+           foreach my $source (sort {$a cmp $b} keys %Stats_dropped) {
+                printf "\n\t%-30s %12i", $source, $Stats_dropped{$source};
+           }
+        }
+        if (keys %Stats_dropped_net) {
+           print "\nDropped(net):";
+           foreach my $source (sort {$a cmp $b} keys %Stats_dropped_net) {
+                printf "\n\t%-30s %12i", $source, $Stats_dropped_net{$source};
+           }
+        }
+        if (keys %Stats_global) {
+           print "\nGlobal:";
+           foreach my $source (sort {$a cmp $b} keys %Stats_global) {
+                printf "\n\t%-30s %12i", $source, $Stats_global{$source};
+           }
+        }
+	print "\n";
+     }
+}
+
+if ($Drops) {
+    print "\nSyslog-ng dropped " . $Drops ." line(s)\n";
+}
+
+if (keys %Warnings) {
+   print "\nWarnings:\n";
+   foreach my $warning (keys %Warnings) {
+      print "    $warning : $Warnings{$warning} Time(s)\n";
+   }
+}
+
+if (keys %OtherList) {
+   print "\n**** Unmatched entries ****\n";
+   foreach my $Error (keys %OtherList) {
+      print "    $Error : $OtherList{$Error} Time(s)\n";
+   }
+}
+
+### return without a failure ###
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+

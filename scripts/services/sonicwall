@@ -1,0 +1,693 @@
+#########################################################################
+# $Id: sonicwall,v 1.4 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: sonicwall,v $
+# Revision 1.4  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.3  2008/03/24 23:31:27  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.2  2006/10/18 17:57:49  mike
+# Updates from Laurent DuFour -mgt
+#
+# Revision 1.1  2005/05/04 15:54:23  bjorn
+# Sonicwall submitted by Laurent Dufour
+#
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Laurent DUFOUR <laurent.dufour@havas.com>,<dufour_l@hotmail.com>
+#    based on the work of
+#    Kirk Bauer <kirk@kaybee.org>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to logwatch-devel@lists.sourceforge.net
+########################################################
+
+#######################################################
+## Copyright (c) 2008 Laurent DUFOUR
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':all';
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my %configConvert = (
+    'human-readable'    => 0,
+    'Human-readable'    => 1,
+    'truncate-readable' => 2,
+  );
+
+# Taken from DiskUsage.pm inside Filesys-DiskUsage-0.02
+#
+# Jose Castro, C<< <cog@cpan.org>
+# Please report any bugs or feature requests to
+# C<bug-disk-usage@rt.cpan.org>, or through the web interface at
+# L<http://rt.cpan.org>.  I will be notified, and then you'll
+# automatically be notified of progress on your bug as I make changes.
+#
+# Copyright 2004 Jose Castro, All Rights Reserved.
+#
+#This program is free software; you can redistribute it and/or modify it
+#under the same terms as Perl itself.
+#
+#
+# convert size to human readable format
+sub _convert {
+  defined (my $size = shift) || return undef;
+  my $config = {@_};
+#  $config->{human} || return $size;
+  my $block = $config->{'Human-readable'} ? 1000 : 1024;
+  my @args = qw/B K M G/;
+  while (@args && $size > $block) {
+    shift @args;
+    $size /= $block;
+  }
+
+  if ($config->{'truncate-readable'} > 0) {
+    $size = sprintf("%.$config->{'truncate-readable'}f",$size);
+  }
+
+  return "$size$args[0]";
+}
+
+
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside SONICWALL Filter \n\n";
+    $DebugCounter = 1;
+}
+
+
+my ($month,$day,$time,$host_ip,$host,$conn,$msg,$message);
+
+while (defined($ThisLine = <STDIN>)) {
+    if ( $Debug >= 30 ) {
+	print STDERR "DEBUG($DebugCounter): $ThisLine";
+	$DebugCounter++;
+    }
+
+($month,$day,$time,$host_ip,$host_id,$host_sn,$msg)=split(/ +/,$ThisLine,7);
+
+if ($ThisLine =~ /sn=/ ) { #mean that we ave to deal with a sonicwall log file line
+
+   if ( ($ThisLine =~ /traffic/ ) or
+         ($ThisLine =~ /Copyright/ ) or
+         ($ThisLine =~ /removed due to simultaneous rekey/ ) or
+         ($ThisLine =~ /Administrator logged out/ ) or
+         ($ThisLine =~ /Connection (Closed|Opened)/ ) or
+         ($ThisLine =~ /(TCP|UDP) connection dropped/ )
+    ) {
+      # don't care about this, will code this later
+   }
+
+    elsif ( ($number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$pad) = ($ThisLine =~ /msg="UDP packet dropped" n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? (.*)?/) ) {
+      $UDP_dropped{$host_ip}{LookupIP($src_ip)," to ",LookupIP($dst_ip)}++
+   }
+    elsif ( ($number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$pad) = ($ThisLine =~ /msg="TCP packet dropped" n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? (.*)?/) ) {
+      $TCP_dropped{$host_ip}{LookupIP($src_ip)," to ",LookupIP($dst_ip)}++
+   }
+    elsif ( ($number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$pad) = ($ThisLine =~ /msg="ICMP packet dropped" n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? (.*)?/) ) {
+      $ICMP_dropped{$host_ip}{LookupIP($src_ip)," to ",LookupIP($dst_ip)}++
+   }
+
+    elsif ( ($number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$ip_proto,$xfer_port_type,$op_type,$http_result) = ($ThisLine =~ /n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? proto=(udp|tcp)\/(http|80) op=(HEAD|Other) result=(\d+)/) ) {
+
+ 	if ($op_type eq "HEAD") {
+	$URL_HEAD{$host_ip}{$url}++;
+	}
+	else {
+	$URL_OTHER{$host_ip}{$url}++;
+	}
+}
+
+
+    elsif ( ($number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$ip_proto,$xfer_port_type,$op_type,$xfer_way,$xfer_byte,$http_result,$url,$args) = ($ThisLine =~ /n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? proto=(udp|tcp|icmp)\/(http|80) op=(GET|POST) (rcvd|sent)=(\d+) result=(\d+) dstname=(.*) arg=(.*)(.*)/) ) {
+
+
+	if ($op_type eq "GET") {
+	$URL_GET{$host_ip}{$url}++;
+	}
+	else {
+	$URL_POST{$host_ip}{$url}++;
+	}
+
+      if ($xfer_way eq "sent")	{
+
+        $ProtoPacketSent{$host_ip}{$ip_proto}++;
+	$TotalProtoByteSent{$host_ip}{$ip_proto}=$TotalProtoByteSent{$host_ip}{$ip_proto}+$xfer_byte;
+
+        if (($ip_proto eq "tcp") or ($ip_proto eq "udp")) {
+        $ByteSent{$host_ip}{$ip_proto,"/",$xfer_port_type}=$ByteSent{$ip_proto}{$ip_proto,"/",$xfer_port_type}+$xfer_byte;
+ 	$PortPacketSent{$host_ip}{$ip_proto,"/",$xfer_port_type}++;
+	}
+     }
+ else {
+        $ProtoPacketReceived{$host_ip}{$ip_proto}++;
+	$TotalProtoByteReceived{$host_ip}{$ip_proto}=$TotalProtoByteReceived{$host_ip}{$ip_proto}+$xfer_byte;
+
+        if (($ip_proto eq "tcp") or ($ip_proto eq "udp")) {
+	 $ByteReceived{$host_ip}{$ip_proto,"/",$xfer_port_type}=$ByteReceived{$ip_proto}{$ip_proto,"/",$xfer_port_type}+$xfer_byte;
+	 $PortPacketReceived{$host_ip}{$ip_proto,"/",$xfer_port_type}++;
+	}
+   }
+}
+
+
+    elsif ( ($number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$ip_proto,$xfer_port_type,$op_type,$xfer_byte_sent,$xfer_byte_rcvd,$http_result,$url,$args) = ($ThisLine =~ /n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? proto=(udp|tcp|icmp)\/(http|80) op=(GET|POST) sent=(\d+) rcvd=(\d+) result=(\d+) dstname=(.*) (arg=(.*))?/) ) {
+
+
+	if ($op_type eq "GET") {
+	$URL_GET{$host_ip}{$url}++;
+	}
+	else {
+	$URL_POST{$host_ip}{$url}++;
+	}
+
+        $ProtoPacketSent{$host_ip}{$ip_proto}++;
+	$TotalProtoByteSent{$host_ip}{$ip_proto}=$TotalProtoByteSent{$host_ip}{$ip_proto}+$xfer_byte_sent;
+
+        if (($ip_proto eq "tcp") or ($ip_proto eq "udp")) {
+        $ByteSent{$host_ip}{$ip_proto,"/",$xfer_port_type}=$ByteSent{$ip_proto}{$ip_proto,"/",$xfer_port_type}+$xfer_byte_sent;
+ 	$PortPacketSent{$host_ip}{$ip_proto,"/",$xfer_port_type}++;
+	}
+
+	$ProtoPacketReceived{$host_ip}{$ip_proto}++;
+	$TotalProtoByteReceived{$host_ip}{$ip_proto}=$TotalProtoByteReceived{$host_ip}{$ip_proto}+$xfer_byte_rcvd;
+
+        if (($ip_proto eq "tcp") or ($ip_proto eq "udp")) {
+	 $ByteReceived{$host_ip}{$ip_proto,"/",$xfer_port_type}=$ByteReceived{$ip_proto}{$ip_proto,"/",$xfer_port_type}+$xfer_byte_rcvd;
+	 $PortPacketReceived{$host_ip}{$ip_proto,"/",$xfer_port_type}++;
+	}
+}
+
+
+
+
+
+
+
+
+
+    elsif ( ($number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$ip_proto,$xfer_port_type,$xfer_way,$xfer_byte) = ($ThisLine =~ /n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? proto=(udp|tcp|icmp)\/(.*) (rcvd|sent)=(\d+)(.*)/) ) {
+
+      if ($xfer_way eq "sent")	{
+
+        $ProtoPacketSent{$host_ip}{$ip_proto}++;
+	$TotalProtoByteSent{$host_ip}{$ip_proto}=$TotalProtoByteSent{$host_ip}{$ip_proto}+$xfer_byte;
+
+        if (($ip_proto eq "tcp") or ($ip_proto eq "udp")) {
+        $ByteSent{$host_ip}{$ip_proto,"/",$xfer_port_type}=$ByteSent{$ip_proto}{$ip_proto,"/",$xfer_port_type}+$xfer_byte;
+ 	$PortPacketSent{$host_ip}{$ip_proto,"/",$xfer_port_type}++;
+	}
+     }
+ else {
+        $ProtoPacketReceived{$host_ip}{$ip_proto}++;
+	$TotalProtoByteReceived{$host_ip}{$ip_proto}=$TotalProtoByteReceived{$host_ip}{$ip_proto}+$xfer_byte;
+
+        if (($ip_proto eq "tcp") or ($ip_proto eq "udp")) {
+	 $ByteReceived{$host_ip}{$ip_proto,"/",$xfer_port_type}=$ByteReceived{$ip_proto}{$ip_proto,"/",$xfer_port_type}+$xfer_byte;
+	 $PortPacketReceived{$host_ip}{$ip_proto,"/",$xfer_port_type}++;
+	}
+   }
+}
+#time="2005-03-23 09:03:27" fw=62.2.84.91 pri=5 c=128 m=37 msg="UDP packet dropped" n=3759 src=64.74.133.26:11379:WAN dst=62.2.84.91:33436:WAN^M
+#Mar 23 12:45:32 10.15.30.1 id=firewall sn=004010144097 time="2005-03-23 11:08:20" fw=62.2.84.91 pri=6 c=1024 m=98 n=61505 src=195.143.213.210:4992:WAN dst=62.2.84.92:1802:DMZ proto=tcp/1802 rcvd=106 ^M
+
+
+    elsif ( ($dst_ip,$msg) = ($ThisLine =~ /System Config saved from host (\d+\.\d+\.\d+\.\d+) (.*)/) ) {
+      $SysCfgSaved{$host_ip}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /The system configuration was saved from host (\d+\.\d+\.\d+\.\d+) by (.*)/) ) {
+      $SysCfgSaved{$host_ip}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($ThisLine =~ /Compiled/) ) {
+      $Started{$host_ip}++;
+   }
+   elsif ( ($ThisLine =~ /DNS entries have been automatically refreshed./) ) {
+      $DNSRefreshed{$host_ip}++;
+   }
+   elsif ( ($ThisLine =~ /DNS has been refreshed./) ) {
+      $DNSRefreshed{$host_ip}++;
+   }
+   elsif ( ($ThisLine =~ /Log successfully sent via email/) ) {
+      $SyslogHost{$host_ip}{$host_ip}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog facility has been changed/) ) {
+      $SyslogFacility{$host_ip}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog security facility has been changed/) ) {
+      $SyslogFacility{$host_ip}++;
+   }
+   elsif ( ($ThisLine =~ /The system clock has been updated through NTP./) ) {
+      $NTPUpdated{$host_ip}++;
+   }
+   elsif ( ($ThisLine =~ /failed to get clock through NTP/) ) {
+      $NTPFailed{$host_ip}++;
+   }
+   elsif ( ($ThisLine =~ /Access Rule added/) ) {
+      $AccessRuleAdded{$host_ip}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RELOAD: (.*)/) ) {
+      $ReloadRequested{$host_ip}{$message}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RESTART: (.*)/) ) {
+      $Restarted{$host_ip}{$message}++;
+   }
+   elsif ( $ThisLine =~ m/msg="Probable TCP NULL scan " n=(\d+) src=(\d+\.\d+\.\d+\.\d+) (.*)/ ) {
+       if ( $Debug >= 5 ) {
+	   print STDERR "DEBUG: Found -TCP NULL scan- line\n";
+       }
+       my $name = LookupIP($2);
+       $Temp = "TCP NULL scan from $name";
+       $TCP_NULL_scan{$host_ip}{$Temp}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /msg="Successful administrator login" n=(\d+) src=(\d+\.\d+\.\d+\.\d+) (.*)/) ) {
+       if ($Debug >= 5) {
+	   print STDERR "DEBUG: Found -$1 logged in from $4 using $2\n";
+       }
+       if ($Detail >= 20) {
+	   $Users{$host_ip}{"from ",$2}{"using port 80"}{$1}++;
+       } else {
+	   $Users{$host_ip}{"from ",$2}{"using port 80"}{"(all)"}++;
+       }
+   }
+   elsif ( ($interface) = ($ThisLine =~ /msg="(WAN zone administrator login allowed|Web management request allowed)" n=(\d+) usr=(\w+) src=(\d+\.\d+\.\d+\.\d+)(.*)?/) ) {
+       if ($Debug >= 5) {
+	   print STDERR "DEBUG: Found -$1 logged in from $5 using $3\n";
+       }
+       if ($Detail >= 20) {
+	   $Users{$host_ip}{"from ",$3}{"using port 80"}{$1}++;
+       } else {
+	   $Users{$host_ip}{"from ",$3}{"using port 80"}{"(all)"}++;
+       }
+   }
+
+
+
+   elsif ( $ThisLine =~ m/msg="Administrator login failed - incorrect password" n=(\d+) src=(\d+\.\d+\.\d+\.\d+) (.*)/ ) {
+       if ( $Debug >= 5 ) {
+	   print STDERR "DEBUG: Found -Failed login- line\n";
+       }
+       my $name = LookupIP($2);
+       $Temp = "HTTP from $name";
+       $BadAdminLogins{$host_ip}{"Administrator login failed - incorrect password from $name"}++;
+       $IllegalUsers{$host_ip}{$Temp}++;
+   }
+   elsif ( $ThisLine =~ m/msg="Unknown user attempted to log in" n=(\d+) src=(\d+\.\d+\.\d+\.\d+) dst=(\d+\.\d+\.\d+\.\d+) user=(.*)/ ) {
+       if ( $Debug >= 5 ) {
+	   print STDERR "DEBUG: Found -Failed login- line\n";
+       }
+       my $name = LookupIP($2);
+       $Temp = "HTTP from $name";
+       $BadLogins{$host_ip}{"$4 user attempted to log in from $name"}++;
+       $IllegalUsers{$host_ip}{$Temp}++;
+   }
+   elsif ( $ThisLine =~ m/SSH client at (.+) has attempted to make an SCS connection to interface untrust with IP (.+) but failed (.*)/ ) {
+       my $name = LookupIP($2);
+       $Temp = "SSH from $name";
+       $BadLogins{$host_ip}{$Temp}++;
+       $IllegalUsers{$host_ip}{$Temp}++;
+   }
+
+    elsif ( ($Msg,$number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$pad) = ($ThisLine =~ /msg="(.*)" n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)?(S+)?(.*)?/) ) {
+      $Msg{$host_ip}{$Msg," for ",LookupIP($src_ip)," to ",LookupIP($dst_ip)}++
+   }
+    elsif ( ($Msg,$number,$src_ip,$port_src,$interface_src,$src_name,$dst_ip,$port_dst,$interface_dst,$dst_name,$pad) = ($ThisLine =~ /msg="(Ping of death dropped|Smurf Amplification attack dropped)" n=(\d+) src=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)? dst=(\d+\.\d+\.\d+\.\d+):(\d+):(WAN|LAN|DMZ):?(.*)?/) ) {
+      $Msg{$host_ip}{$Msg," for ",LookupIP($src_ip)," to ",LookupIP($dst_ip)}++
+   }
+
+
+
+else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+} #end of mean we have a sonic wall logfile line
+
+if (keys %Started) {
+   print "\nDevice started :\n";
+   foreach $ThisOne (keys %Started) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Started{$ThisOne}}) {
+         print "\t Started" .$ThatOne . "\t: " . $Started{$ThisOne}{$ThatOne} . "{ Time(s)\n";
+      }
+   }
+}
+
+if (keys %UDP_dropped) {
+   print "\nDevice where ip UDP packets have been dropped  :\n";
+   foreach $ThisOne (keys %UDP_dropped) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$UDP_dropped{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $UDP_dropped{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %TCP_dropped) {
+   print "\nDevice where ip TCP packets have been dropped  :\n";
+   foreach $ThisOne (keys %TCP_dropped) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$TCP_dropped{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $TCP_dropped{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ICMP_dropped) {
+   print "\nDevice where ip ICMP packets have been dropped  :\n";
+   foreach $ThisOne (keys %ICMP_dropped) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ICMP_dropped{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ICMP_dropped{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Msg) {
+   print "\nDevice others message  :\n";
+   foreach $ThisOne (keys %Msg) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Msg{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Msg{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %URL_GET) ) {
+   print "\nDevice URL GET :\n";
+   foreach $ThisOne (keys %URL_GET) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$URL_GET{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $URL_GET{$ThisOne}{$ThatOne} . " times(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %URL_POST) ) {
+   print "\nDevice URL POST :\n";
+   foreach $ThisOne (keys %URL_POST) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$URL_POST{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $URL_POST{$ThisOne}{$ThatOne} . " times(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %URL_HEAD) ) {
+   print "\nDevice URL HEAD :\n";
+   foreach $ThisOne (keys %URL_HEAD) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$URL_HEAD{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $URL_HEAD{$ThisOne}{$ThatOne} . " times(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %URL_OTHER) ) {
+   print "\nDevice URL OTHER :\n";
+   foreach $ThisOne (keys %URL_OTHER) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$URL_OTHER{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $URL_OTHER{$ThisOne}{$ThatOne} . " times(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %ProtoPacketReceived) ) {
+   print "\nDevice Total packets received by protocols :\n";
+   foreach $ThisOne (keys %ProtoPacketReceived) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ProtoPacketReceived{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ProtoPacketReceived{$ThisOne}{$ThatOne} . " packet(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %PortPacketReceived) ) {
+   print "\nDevice Total packets received by ports :\n";
+   foreach $ThisOne (keys %PortPacketReceived) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PortPacketReceived{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PortPacketReceived{$ThisOne}{$ThatOne} . " packet(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %TotalProtoByteReceived) ) {
+   print "\nDevice Total Bytes received by protocols :\n";
+   foreach $ThisOne (keys %TotalProtoByteReceived) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$TotalProtoByteReceived{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . _convert($TotalProtoByteReceived{$ThisOne}{$ThatOne}, %configConvert ) . " Byte(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %ByteReceived) ) {
+   print "\nDevice Total Bytes received by ports :\n";
+   foreach $ThisOne (keys %ByteReceived) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ByteReceived{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " .  _convert($ByteReceived{$ThisOne}{$ThatOne}, %configConvert ) . " Byte(s)\n";
+      }
+   }
+}
+
+
+if ( ( $Detail >= 5 ) and (keys %ProtoPacketSent) ) {
+   print "\nDevice Total packets sent by protocols :\n";
+   foreach $ThisOne (keys %ProtoPacketSent) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ProtoPacketSent{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ProtoPacketSent{$ThisOne}{$ThatOne} . " packet(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %PortPacketSent) ) {
+   print "\nDevice Total packets sent by ports :\n";
+   foreach $ThisOne (keys %PortPacketSent) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PortPacketSent{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PortPacketSent{$ThisOne}{$ThatOne} . " packet(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %TotalProtoByteSent) ) {
+   print "\nDevice Total Bytes sent by protocols :\n";
+   foreach $ThisOne (keys %TotalProtoByteSent) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$TotalProtoByteSent{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . _convert($TotalProtoByteSent{$ThisOne}{$ThatOne},  %configConvert ) . " Byte(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 5 ) and (keys %ByteSent) ) {
+   print "\nDevice Total Bytes sent by ports :\n";
+   foreach $ThisOne (keys %ByteSent) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ByteSent{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . _convert($ByteSent{$ThisOne}{$ThatOne}, %configConvert ) . " Byte(s)\n";
+      }
+   }
+}
+
+
+
+if (keys %NTPUpdated) {
+   print "\nDevice where The system clock has been updated through NTP :\n";
+   foreach $ThisOne (keys %NTPUpdated) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NTPUpdated{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPUpdated{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPFailed) {
+   print "\nDevice where failed to get clock through NTP :\n";
+   foreach $ThisOne (keys %NTPFailed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NTPFailed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPFailed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %DNSRefreshed) {
+   print "\nDevice where DNS have been refreshed  :\n";
+   foreach $ThisOne (keys %DNSRefreshed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$DNSRefreshed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DNSRefreshed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SyslogFacility) {
+   print "\nDevice where Syslog facility has been changed  :\n";
+   foreach $ThisOne (keys %SyslogFacility) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SyslogFacility{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SyslogFacility{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SyslogHost) {
+   print "\nDevice where Syslog have been mail succesfully :\n";
+   foreach $ThisOne (keys %SyslogHost) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SyslogHost{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SyslogHost{$ThisOne}{$ThisOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if (keys %Restarted) {
+   print "\nDevice restarted :\n";
+   foreach $ThisOne (keys %Restarted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Restarted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Restarted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %AccessRuleAdded) {
+   print "\nDevice where rules have been added :\n";
+   foreach $ThisOne (keys %AccessRuleAdded) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$AccessRuleAdded{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $AccessRuleAdded{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ReloadRequested) {
+   print "\nDevice reload requested :\n";
+   foreach $ThisOne (keys %ReloadRequested) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ReloadRequested{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ReloadRequested{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SysCfgSaved) {
+   print "\nDevice where system config have been saved :\n";
+   foreach $ThisOne (keys %SysCfgSaved) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SysCfgSaved{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SysCfgSaved{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+
+if (keys %BadLogins) {
+    print "\nFailed logins from these:\n";
+    foreach $ThisOne (keys %BadLogins) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$BadLogins{$ThisOne}}) {
+	    print "\t   $_: $BadLogins{$ThisOne}{$_} Time(s)\n";
+	}
+    }
+}
+
+if (keys %TCP_NULL_scan) {
+    print "\nDevice whcih had been ports scanned :\n";
+    foreach $ThisOne (keys %TCP_NULL_scan) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$TCP_NULL_scan{$ThisOne}}) {
+	    print "\t   $_: $TCP_NULL_scan{$ThisOne}{$_} Time(s)\n";
+	}
+    }
+}
+
+if (keys %BadAdminLogins) {
+    print "\nFailed administrator logins from these:\n";
+    foreach $ThisOne (keys %BadAdminLogins) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$BadAdminLogins{$ThisOne}}) {
+	    print "\t   $_: $BadAdminLogins{$ThisOne}{$_} Time(s)\n";
+	}
+    }
+}
+
+if (keys %IllegalUsers) {
+    print "\nIllegal users from these:\n";
+    foreach $ThisOne (keys %IllegalUsers) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$IllegalUsers{$ThisOne}}) {
+	    print "\t   $_: $IllegalUsers{$ThisOne}{$_} Time(s)\n";
+
+	}
+    }
+}
+
+
+if (keys %Users) {
+    print "\nUsers logging in through :\n";
+foreach $ThisOne (keys %Users) {
+    print "   " . $ThisOne . ":\n";
+
+foreach $user (sort {$a cmp $b} keys %{$Users{$ThisOne}}) {
+    print "   $user:\n";
+    my $totalSort = TotalCountOrder(%{$Users{$ThisOne}{$user}}, \&SortIP);
+    foreach my $ip (sort $totalSort keys %{$Users{$ThisOne}{$user}}) {
+	my $name = LookupIP($ip);
+	if ($Detail >= 20) {
+            print "      $name:\n";
+            my $sort = CountOrder(%{$Users{$ThisOne}{$user}{$ip}});
+            foreach my $method (sort $sort keys %{$Users{$ThisOne}{$user}{$ip}}) {
+		my $val = $Users{$ThisOne}{$user}{$ip}{$method};
+		my $plural = ($val > 1) ? "s" : "";
+		print "         $method: $val time$plural\n";
+            }
+	} else {
+            my $val = (values %{$Users{$ThisOne}{$user}{$ip}})[0];
+            my $plural = ($val > 1) ? "s" : "";
+            print "      $name: $val time$plural\n";
+	}
+    }
+}
+}
+}
+
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

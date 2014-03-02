@@ -1,0 +1,126 @@
+
+##########################################################################
+# $Id: in.qpopper,v 1.15 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Kenneth Porter <shiva@well.com>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to shiva@well.com.
+########################################################
+
+#####################################################
+## Copyright (c) 2008 Kenneth Porter
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+    if ( ($ThisLine =~ /xsender/) or
+         ( $ThisLine =~ /.drac.:/ ) or
+         ( $ThisLine =~ /Timing/ ) or
+         ( $ThisLine =~ /-ERR \[AUTH\]/ ) or
+         ( $ThisLine =~ /canonical name of client/ ) or
+         ( $ThisLine =~ /I\/O error flushing output to client/ ) or
+         ( $ThisLine =~ /-ERR SIGHUP or SIGPIPE flagged/ ) or
+         ( $ThisLine =~ /-ERR POP hangup/ ) or
+         ( $ThisLine =~ /-ERR POP EOF or I\/O Error/ ) or
+         ( $ThisLine =~ /-ERR \[IN-USE\] / ) or
+         ( $ThisLine =~ /Incorrect octet count/ ) ) {
+        # We don't care about these
+    }
+    ## Stats: <UserID> 0 0 0 0 <Host> <IP>
+    elsif (($UserID, $NumDeleted, $BytesDeleted, $NumLeft, $BytesLeft) = ( $ThisLine =~ /Stats: ([^ ]+) ([^ ]+) ([^ ]+) ([^ ]+) ([^ ]+)/ )) {
+        $Stats{$UserID}{"Times"}++;
+        $Stats{$UserID}{"NumDel"} += $NumDeleted;
+        $Stats{$UserID}{"BytesDel"} += $BytesDeleted;
+        $Stats{$UserID}{"NumLeft"} = $NumLeft;
+        $Stats{$UserID}{"BytesLeft"} = $BytesLeft;
+    }
+    elsif (($UserID) = ($ThisLine =~ /^\[AUTH\] Failed attempted login to ([^ ]+) from host/ )) {
+        $FailedLogin{$UserID}++;
+    }
+    elsif ( $ThisLine =~ s/^connect from ([^ ]+)$/$1/ ) {
+        $Connections{$ThisLine}++;
+    }
+    elsif ( $ThisLine =~ s/^\(v[0-9.]+\) POP login by user "?[^ ]+"? at \([^ ]+\) ([^ ]+)$/$1/ ) {
+        $Connections{$ThisLine}++;
+    }
+    elsif ( $ThisLine =~ s/^apop \"(.*)\".*/$1/ ) {
+        $ApopConnections{$ThisLine}++;
+    }
+    else {
+        # Report any unmatched entries...
+        chomp($ThisLine);
+        $OtherList{$ThisLine}++;
+    }
+}
+
+if ( (keys %Connections) and ($Detail >= 10) ) {
+    print "\nPlaintext Connections:\n";
+    foreach $ThisOne (keys %Connections) {
+        print "   " . $Connections{$ThisOne} . " from " . $ThisOne;
+    }
+}
+
+if ( (keys %ApopConnections) and ($Detail >= 10) ) {
+    print "\nAPOP Connections:\n";
+    foreach $ThisOne (keys %ApopConnections) {
+        print "   " . $ApopConnections{$ThisOne} . " from " . $ThisOne;
+    }
+}
+
+if ((keys %Stats) and ($Detail >= 10)) {
+    print "\nUser Statistics:\n";
+    print "                        |     Deleted    |      Kept      |\n";
+    print "User Name        Times  |   Num  KBytes  |   Num  KBytes  |\n";
+    foreach $UserID (sort {$Stats{$b}{"BytesDel"}<=>$Stats{$a}{"BytesDel"}} keys %Stats)
+    {
+        printf("%-15s  %5d  | %5d  %6d  | %5d  %6d  |\n", $UserID, $Stats{$UserID}{"Times"}, $Stats{$UserID}{"NumDel"}, $Stats{$UserID}{"BytesDel"}/1024, $Stats{$UserID}{"NumLeft"}, $Stats{$UserID}{"BytesLeft"}/1024);
+        $Times += $Stats{$UserID}{"Times"};
+        $NumDel += $Stats{$UserID}{"NumDel"};
+        $BytesDel += $Stats{$UserID}{"BytesDel"};
+        $NumLeft += $Stats{$UserID}{"NumLeft"};
+        $BytesLeft += $Stats{$UserID}{"BytesLeft"};
+    }
+    print "------------------------+----------------+----------------+\n";
+    printf("TOTALS           %5d  | %5d  %6d  | %5d  %6d  |\n", $Times, $NumDel, $BytesDel/1024, $NumLeft, $BytesLeft/1024);
+}
+
+if (keys %FailedLogin) {
+   print "\nFailed Logins:\n";
+   foreach $UserID (sort {$FailedLogin{$b}<=>$FailedLogin{$a} } keys %FailedLogin) {
+      print "  $UserID: $FailedLogin{$UserID} time(s).\n";
+   }; # foreach
+}; # if
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $line (sort {$OtherList{$b}<=>$OtherList{$a} } keys %OtherList)
+   {
+      print "   $line: $OtherList{$line} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

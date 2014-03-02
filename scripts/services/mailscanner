@@ -1,0 +1,665 @@
+##########################################################################
+# $Id: mailscanner,v 1.38 2009/11/16 17:37:22 mike Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Mike Tremaine <mgt \@\ stellarcore.net>
+#
+# Sophos Support and other improvments by Mark W. Nienberg
+# MailScan_Spam_Act contributed by Kev Green
+#
+# Some more clean up rules based on extensive use of some MailScanner
+# settings and F-Prot and ClamAV as dual scanners by Hugo van der Kooij
+#
+# More F-Prot code from John Wilcock
+#
+########################################################
+
+#####################################################
+## Copyright (c) 2008 Mike Tremaine
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+my $phishing_detail = $ENV{'mailscanner_phishing_detail'} || 0;
+my $mailscanner_phishingthreshold = $ENV{'mailscanner_phishingthreshold'} || 0;
+
+#Inits
+my $MailScan_bytes = 0;
+my $MailScan_Content = 0;
+my $MailScan_Delivered = 0;
+my $MailScan_Other = 0;
+my $MailScan_RBL = 0;
+my $MailScan_Received = 0;
+my $MailScan_Spam = 0;
+my $MailScan_Unscanned = 0;
+my $MailScan_Virus = 0;
+my $SA_timeout = 0;
+my $MailScan_ScannerTimeout = 0;
+my $MailScan_GoodWatermark = 0;
+my $MailScan_BadWatermark = 0;
+my $MailScan_SkipWatermark = 0;
+my $SpamAssassin_Rule_Actions = 0;
+my $MailScan_Deleted_pdb = 0;
+my $MailScan_Found_pdb = 0;
+my $MailScan_Spam_Virus = 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   #($QueueID) = ($ThisLine =~ m/^([a-zA-Z0-9]+): / );
+   $ThisLine =~ s/^[a-zA-Z0-9]+: //;
+   if ( ( $ThisLine =~ m/^Saved infected/ ) or
+         ( $ThisLine =~ m/^Expanding TNEF archive/ ) or
+         #TNEF Noise remove for now. IF anyone wants this counted just speak up -mgt
+         ( $ThisLine =~ m/has had TNEF winmail.dat removed/ ) or
+         ( $ThisLine =~ m/added TNEF contents/ ) or
+         ( $ThisLine =~ m/^Warned about/ ) or
+         ( $ThisLine =~ m/^Sender Warnings:/ ) or
+         ( $ThisLine =~ m/X-Spam/ ) or
+         ( $ThisLine =~ m/Using locktype = (flock|posix)/ ) or
+         ( $ThisLine =~ m/Creating hardcoded struct_flock subroutine for / ) or
+         ( $ThisLine =~ m/New Batch: Found/ ) or
+         ( $ThisLine =~ m/Attempting to disinfect/ ) or
+         ( $ThisLine =~ m/Rescan found/ ) or
+         ( $ThisLine =~ m/Virus Re-scanning:/ ) or
+         ( $ThisLine =~ m/Content Checks: Fixed awkward MIME boundary for Cyrus IMAP/ ) or
+         ( $ThisLine =~ m/Delete bayes lockfile/ ) or
+         ( $ThisLine =~ m/MailScanner E-Mail Virus Scanner version/ ) or
+         ( $ThisLine =~ m/MailScanner child dying of old age/ ) or
+         ( $ThisLine =~ m/MailScanner child caught a SIGHUP/ ) or
+         ( $ThisLine =~ m/Virus and Content Scanning/ ) or
+         ( $ThisLine =~ m/Virus Scanning: [\w]+ found/ ) or
+         ( $ThisLine =~ m/Virus Scanning: ClamAV Module found [\d]+ infections/ ) or
+         ( $ThisLine =~ m/^ClamAV virus database has been updated/ ) or
+         ( $ThisLine =~ m/^ClamAV update of/ ) or
+         ( $ThisLine =~ m/^ClamAV scanner using unrar command / ) or
+         ( $ThisLine =~ m/Saved entire message to/ ) or
+         ( $ThisLine =~ m/Spam Checks: Starting/ ) or
+         ( $ThisLine =~ m/SophosSAVI .+ recognizing [0-9]+ viruses/ ) or
+         ( $ThisLine =~ m/SophosSAVI using [0-9]+ IDE files/ ) or
+         ( $ThisLine =~ m/Sophos SAVI library has been updated/ ) or
+         ( $ThisLine =~ m/Sophos.*update.* detected, resetting SAVI/ ) or
+         #( $ThisLine =~ m/RBL checks: .+ found in RFC-IGNORANT-POSTMASTER/ ) or
+         ( $ThisLine =~ m/F-Prot found/ ) or
+         ( $ThisLine =~ m/SpamAssassin Bayes database rebuild starting|preparing|completed/ ) or
+         ( $ThisLine =~ m/Rebuilding SpamAssassin Bayes database/ ) or
+         ( $ThisLine =~ m/Skipping SpamAssassin while waiting for Bayes/ ) or
+         ( $ThisLine =~ m/Enabling SpamAssassin auto-whitelist functionality/ ) or
+         ( $ThisLine =~ m/Bayes database rebuild is due/ ) or
+         ( $ThisLine =~ m/Content Checks: Detected and will convert|disarm HTML/ ) or
+         ( $ThisLine =~ m/Content Checks: Detected and have disarmed HTML message/ ) or
+         ( $ThisLine =~ m/Content Checks: Found [0-9]+ problems/ ) or
+         ( $ThisLine =~ m/Read [0-9]+ hostnames from the phishing whitelist/ ) or
+         ( $ThisLine =~ m/completed at [0-9]+ bytes per second/ ) or
+         ( $ThisLine =~ m/Message .+ from .+ to .+ is/ ) or
+         ( $ThisLine =~ m/^[A-F0-9]+\.[A-F0-9]{5} to/ ) or #for postfix Requeue:
+         ( $ThisLine =~ m/^calling custom .* function/ ) or
+         ( $ThisLine =~ m/^Initialising database connection/ ) or
+         ( $ThisLine =~ m/^Finished initialising database connection/ ) or
+         ( $ThisLine =~ m/^Disconnected from the database/ ) or
+         ( $ThisLine =~ m/^<A> tag found in message/ ) or
+         ( $ThisLine =~ m/^Viruses marked as silent:/ ) or
+         ( $ThisLine =~ m/^Saved archive copies of/ ) or
+         ( $ThisLine =~ m/^Logging message .+ to SQL/ ) or
+         ( $ThisLine =~ m/^Started SQL Logging child/ ) or
+         ( $ThisLine =~ m/^Starting up SQL Whitelist|Blacklist/ ) or
+         ( $ThisLine =~ m/^Read .+ whitelist|blacklist entries/ ) or
+         ( $ThisLine =~ m/^Closing down by-domain spam whitelist|blacklist/ ) or
+         ( $ThisLine =~ m/^Connected to SpamAssassin cache database/ ) or
+         ( $ThisLine =~ m/^Using SpamAssassin results cache/ ) or
+         ( $ThisLine =~ m/^Expired .+ records from the SpamAssassin cache/ ) or
+         ( $ThisLine =~ m/^Batch (\([0-9]+ messages?\) )?processed in .+ seconds/ ) or
+         ( $ThisLine =~ m/^\"Always Looked Up Last\" took .+ seconds/ ) or
+         ( $ThisLine =~ m/^MailScanner child dying after Bayes rebuild/ ) or
+         ( $ThisLine =~ m/^Files hidden in very deeply nested archive/ ) or
+         #IPBlocking -mgt
+         ( $ThisLine =~ m/^Initialising IP blocking/ ) or
+         ( $ThisLine =~ m/^Closing down IP blocking/ ) or
+         ( $ThisLine =~ m/Whitelist refresh time reached/ ) or
+         ( $ThisLine =~ m/Skipping sender of precedence list/ ) or
+         ( $ThisLine =~ m/^Read \d+ IP blocking entries from/ ) or
+         #This for Kaspersky I guess it is duplicated by Content checks, remove if not -mgt
+         ( $ThisLine =~ m/^\/var\/spool\/MailScanner\/incoming\/.+SUSPICION/ ) or
+         # New processing database
+         ( $ThisLine =~ m/Connected to [Pp]rocessing(?:-messages| Attempts) [Dd]atabase/ ) or
+         ( $ThisLine =~ m/Found 0 messages in the [Pp]rocessing(?:-messages| Attempts) [Dd]atabase/ ) or
+         ( $ThisLine =~ m/Reading configuration file/ ) or
+         ( $ThisLine =~ m/^SpamAssassin temporary working directory is/ ) or
+         ( $ThisLine =~ m/ignored whitelist, had .+ recipients/ )
+   ) {
+      # We don't care about these
+   } elsif ( $ThisLine =~ m/New Batch: Scanning ([0-9]+) messages, ([0-9]+) bytes/i) {
+      $MailScan_Received = $MailScan_Received + $1;
+      $MailScan_bytes = $MailScan_bytes + $2;
+   } elsif ( $ThisLine =~ m/New Batch: Forwarding ([0-9]+) unscanned messages, ([0-9]+) bytes/i) {
+      $MailScan_Received = $MailScan_Received + $1;
+      $MailScan_Unscanned = $MailScan_Unscanned + $1;
+      $MailScan_bytes = $MailScan_bytes + $2;
+   } elsif ( $ThisLine =~ m/Delivered ([0-9]+)( cleaned)? messages/) {
+      $MailScan_Delivered = $MailScan_Delivered + $1;
+   } elsif ( $ThisLine =~ m/Spam Checks: Found ([0-9]+) spam messages/) {
+      $MailScan_Spam = $MailScan_Spam + $1;
+   } elsif ( $ThisLine =~ m/Virus Scanning: Found ([0-9]+) viruses/) {
+      $MailScan_Virus = $MailScan_Virus + $1;
+   } elsif ( $ThisLine =~ m/Found spam-virus (\S+) in/i) {
+      $MailScan_Spam_Virus++;
+      $Spam_Virus_Found{$1}++;
+   } elsif ( $ThisLine =~ m/infected message .+ came from (.*)/i) {
+      $MailScan_VirualHost = $MailScan_VirualHost + 1;
+      $Hostlist{$1}++;
+   } elsif ( $ThisLine =~ m/Other Checks: Found ([0-9]+) problems/) {
+      $MailScan_Other = $MailScan_Other + $1;
+   } elsif ($ThisLine =~ m/Contains signature of the worm (.+)/) {
+      $VirusType_Antivir{$1}++;
+      $MailScan_Virus_Antivir++;
+   } elsif ($ThisLine =~ m/:infected: (.+)/i) {
+      #without the leading : this would match Fprot so error on the side of matching to much -mgt
+      $VirusType_BitDefender{$1}++;
+      $MailScan_Virus_BitDefender++;
+   } elsif ( ($ThisLine =~ m/^\/var\/spool\/MailScanner\/incoming\/.+: ([\w\_\-\.\/]+) FOUND/i) or
+           ($ThisLine =~ m/Clamd::INFECTED:: (\S+) ::/i) ) {
+      $VirusType_ClamAv{$1}++;
+      $MailScan_Virus_ClamAv++;
+   } elsif ($ThisLine =~ m/ClamAVModule::INFECTED:: (.+)::/) {
+      $VirusType_ClamAVModule{$1}++;
+      $MailScan_Virus_ClamAVModule++;
+   } elsif ($ThisLine =~ m/INFECTED:: (.+) (FOUND )?::/) {
+      $VirusType_Clamd{$1}++;
+      $MailScan_Virus_Clamd++;
+   } elsif ($ThisLine =~ m/\/.+ Infection: (.+)/i) {
+      $VirusType_Fprot{$1}++;
+      $MailScan_Virus_Fprot++;
+   } elsif ($ThisLine =~ m/\/.+ is a security risk named (.+)/i) {
+      $VirusType_Fprot{$1}++;
+      $MailScan_Virus_Fprot++;
+   } elsif ($ThisLine =~ m/\/.+ is a dropper for (.+)/i) {
+      $VirusType_Fprot{$1}++;
+      $MailScan_Virus_Fprot++;
+   } elsif ($ThisLine =~ m/\/.+ contains (.+)/i) {
+      $VirusType_Fprot{$1}++;
+      $MailScan_Virus_Fprot++;
+   } elsif ($ThisLine =~ m/\/.+ could be/i) {
+      $MailScan_Virus_Fprot++;
+   } elsif ($ThisLine =~ m/Found the (.+) virus !!!/) {
+      $VirusType_McAfee{$1}++;
+      $MailScan_Virus_McAfee++;
+   } elsif ($ThisLine =~ m/^\/var\/spool\/MailScanner\/incoming\/.+INFECTED\s+([\w\_\-\.\/]+)/i) {
+      $VirusType_Kaspersky{$1}++;
+      $MailScan_Virus_Kaspersky++;
+   } elsif ($ThisLine =~ m/infected:\s+([\w\_\-\.\/]+)\^M/i) {
+      $VirusType_Kaspersky{$1}++;
+      $MailScan_Virus_Kaspersky++;
+   } elsif ($ThisLine =~ m/>>> Virus \'(.+)\' found/) {
+      $VirusType_Sophos{$1}++;
+      $MailScan_Virus_Sophos++;
+   } elsif ($ThisLine =~ m/SophosSAVI::INFECTED:: (.+)::/) {
+      $VirusType_SophosSavi{$1}++;
+      $MailScan_Virus_SophosSavi++;
+   } elsif ($ThisLine =~ m/Commercial scanner (.+) timed out!/){
+      $VirusScannerTimeout{$1}++;
+      $MailScan_ScannerTimeout++;
+   } elsif ($ThisLine =~ m/Content Checks: Detected and have disarmed (.+) in HTML message in [\w]+/i) {
+      $ContentType{$1}++;
+      $MailScan_Content++;
+   } elsif ($ThisLine =~ m/Content Checks: Detected (.+) in [\w]+/i) {
+      $ContentType{$1}++;
+      $MailScan_Content++;
+   } elsif ($ThisLine =~ m/Filename Checks: Allowing (.+)/i) {
+      if ($ThisLine =~ m/Allowing.*msg\-[0-9]*\-[0-9]*\.[txt|dat|html]/) {
+      # we don't care about these, regular messages
+      } else {
+      #filter sendmail or postfix tag and "(no rule matched)"
+      my $temp_fc = $1;
+      $temp_fc =~ s/[a-z0-9]{14}\s//i;
+      $temp_fc =~ s/[a-z0-9]{9,12}\.[a-z0-9]{5}\s//i;
+      $temp_fc =~ s/\(no rule matched\)//i;
+      $FilenameAllow{$temp_fc}++;
+      $MailScan_FilenameAllow++;
+      }
+   } elsif ($ThisLine =~ m/Filename Checks: (.+)/i) {
+      #filter sendmail or postfix tag
+      my $temp_fc = lc($1);
+      $temp_fc =~ s/\([a-z0-9]{14}\s/\(/i;
+      $temp_fc =~ s/\([a-z0-9]{9,12}\.[a-z0-9]{5}\s/\(/i;
+      $temp_fc =~ s/\s{10,}/ -space- /;
+      $FilenameType{$temp_fc}++;
+      $MailScan_FilenameBanned++;
+   } elsif ($ThisLine =~ m/Filetype Checks: Allowing (.+)/i) {
+      if ($ThisLine =~ m/Allowing.*msg\-[0-9]*\-[0-9]*\.[txt|dat|html]/) {
+      # we don't care about these, regular messages
+      } else {
+      #filter sendmail or postfix tag and "(no match found)"
+      my $temp_fc = $1;
+      $temp_fc =~ s/[a-z0-9]{14}\s//i;
+      $temp_fc =~ s/[a-z0-9]{9,12}\.[a-z0-9]{5}\s//i;
+      $temp_fc =~ s/\(no match found\)//i;
+      $FiletypeAllow{$temp_fc}++;
+      $MailScan_FiletypeAllow++;
+      }
+   } elsif ($ThisLine =~ m/Filetype Checks: (.+)/i) {
+      #filter sendmail or postfix tag
+      my $temp_fc = lc($1);
+      $temp_fc =~ s/\([a-z0-9]{14}\s/\(/i;
+      $temp_fc =~ s/\([a-z0-9]{9,12}\.[a-z0-9]{5}\s/\(/i;
+      $temp_fc =~ s/\s{10,}/ -space- /;
+      $FiletypeType{$temp_fc}++;
+      $MailScan_FiletypeBanned++;
+   } elsif ($ThisLine =~ m/(Password\-protected archive \(.+\)) in \w+/i) {
+      $MailScan_Other = $MailScan_Other + 1;
+      $FilenameType{$1}++;
+      $MailScan_FilenameBanned++;
+   } elsif ($ThisLine =~ /Spam Actions: .+ actions are (.*)/) {
+      $MailScan_Spam_Act{$1}++;
+   } elsif ($ThisLine =~ /SpamAssassin timed out and was killed/) {
+      $SA_timeout++;
+   } elsif ( $ThisLine =~ m/Message .+ from (.+ \(.+\)) is whitelisted/ ) {
+      $MailScan_Whitelisted++;
+      $Whitelisted_Host{$1}++;
+   } elsif ( $ThisLine =~ m/Message .+ from (.+ \(.+\)) to .+ is spam \(blacklisted\)/ ) {
+      $MailScan_Blacklisted++;
+      $Blacklisted_Host{$1}++;
+   } elsif ($ThisLine =~ m/^Found phishing fraud from (.+) claiming to be (.+) in (.+)/) {
+      $MailScan_Phishing++;
+      #Detailed phishing output set in mailscanner.conf
+      #With variable mailscanner_phishing_detail = 1
+      if ($phishing_detail) {
+         $PhishingSourceDest{"$1 claiming to be $2 in $3"}++;
+      } else {
+         $PhishingSourceDest{"$1 claiming to be $2"}++;
+      }
+      my $temp_ph = $1;
+      if ($temp_ph =~ m/^https?:\/\/([^\/\? ]+)/i) {
+         $PhishingSource{$1}++;
+      } else {
+         $PhishingSource{$temp_ph}++;
+      }
+   } elsif ($ThisLine =~ m/^Found ip-based phishing fraud from (.+) in/) {
+      $MailScan_Phishing++;
+      my $temp_ph = $1;
+      if ($temp_ph =~ m/^https?:\/\/([\d\.]+)/i) {
+         $PhishingSource{$1}++;
+      } else {
+         $PhishingSource{$temp_ph}++;
+      }
+      $PhishingSource{$1}++;
+   } elsif ($ThisLine =~ m/^Found definite phishing fraud from (.+) in/) {
+      $MailScan_Phishing++;
+      my $temp_ph = $1;
+      if ($temp_ph =~ m/^https?:\/\/([^\/\? ]+)/i) {
+         $PhishingSource{$1}++;
+      } else {
+         $PhishingSource{$temp_ph}++;
+      }
+   } elsif ($ThisLine =~ m/^HTML-Form tag found in message .+ from (.+)/) {
+      $MailScan_FormTag++;
+      $FormTagSource{$1}++;
+   } elsif ($ThisLine =~ m/^HTML-Script tag found in message .+ from (.+)/) {
+      $MailScan_ScriptTag++;
+      $ScriptTagSource{$1}++;
+   } elsif ($ThisLine =~ m/^HTML-IFrame tag found in message .+ from (.+)/) {
+      $MailScan_IframeTag++;
+      $IframeTagSource{$1}++;
+   } elsif ($ThisLine =~ m/^HTML-Object tag found in message .+ from (.+)/) {
+      $MailScan_ObjectTag++;
+      $ObjectTagSource{$1}++;
+   } elsif ($ThisLine =~ m/^HTML Img tag found in message .+ from (.+)/) {
+      $MailScan_ImgTag++;
+      $ImgTagSource{$1}++;
+   } elsif ($ThisLine =~ m/Logged to MailWatch SQL/) {
+      $MailWatchSQL++;
+   } elsif ($ThisLine =~ m/Quarantining modified message for/) {
+      $DisarmedQuarantined++;
+   } elsif ($ThisLine =~ m/SpamAssassin cache hit for message/) {
+      $SACacheHit++;
+   } elsif ($ThisLine =~ m/RBL checks: .+ found in (.+)/i) {
+      $RBLType{$1}++;
+      $MailScan_RBL++;
+   } elsif ($ThisLine =~ m/Valid Watermark HASH found in Message/) {
+      $MailScan_Skipwatermark++;
+   } elsif ($ThisLine =~ m/Message .+ from .+ has valid watermark/) {
+      $MailScan_GoodWatermark++;
+   } elsif ( ($ThisLine =~ m/Message .+ had bad watermark/) ||
+             ($ThisLine =~ m/Message .+ from .+ has no \(or invalid\) watermark or sender address/) ) {
+      $MailScan_BadWatermark++;
+   } elsif ($ThisLine =~ m/SpamAssassin Rule Actions: rule ([^ ]*) caused action ([^ ]*) .*in message ([0-9a-f.]*)/i) {
+      $SpamAssassin_Rule_Actions++;
+      $SpamAssassin_Rule{$1}++;
+      $SpamAssassin_Action{$2}++;
+      $SpamAssassin_Message{$3}++;
+    } elsif ($ThisLine =~ m/Deleted (\d+) messages from processing-database/) {      $MailScan_Deleted_pdb += $1;
+    } elsif ($ThisLine =~ m/Found (\d+) messages in the [Pp]rocessing(?:-messages| Attempts) [Dd]atabase/) {
+       $MailScan_Found_pdb += $1;
+   } else {
+      chomp($ThisLine);
+      # Report any unmatched entries...
+      $OtherList{$ThisLine}++;
+   }
+}
+
+if ($MailScan_Received > 0) {
+   print "\nMailScanner Status:";
+   print "\n\t" . $MailScan_Received . ' messages Scanned by MailScanner';
+   my $size_total = 1 ;
+   if ($MailScan_bytes < 1024) {
+       $size_total = $MailScan_bytes . ' Total Bytes';
+   } elsif ($MailScan_bytes < 1048576) {
+       $size_total = sprintf("%.1f", ($MailScan_bytes / 1024)) . ' Total KB';
+   } else {
+       $size_total = sprintf("%.1f", ($MailScan_bytes / 1048576)) . ' Total MB';
+   }
+   print "\n\t" . $size_total ;
+}
+
+if ($MailScan_Spam > 0) {
+   print "\n\t" . $MailScan_Spam . ' Spam messages detected by MailScanner';
+}
+
+if (keys %MailScan_Spam_Act) {
+   foreach $ThisOne (sort keys %MailScan_Spam_Act) {
+      if ($MailScan_Spam_Act{$ThisOne} > 0) {
+          print "\n\t\t" . $MailScan_Spam_Act{$ThisOne} . ' Spam messages with action(s) ' .$ThisOne ;
+      }
+   }
+}
+
+if ($SACacheHit > 0) {
+   print "\n\t\t" . $SACacheHit . ' hits from MailScanner SpamAssassin cache';
+}
+
+#if ($MailScan_Spam_Virus > 0) {
+#   print "\n\t" . $MailScan_Spam_Virus . ' Spam messages detected by Virus signatures';
+#}
+
+if ($MailScan_Unscanned > 0) {
+   print "\n\t" . $MailScan_Unscanned . ' Messages forwarded unscanned by MailScanner';
+}
+
+if ($MailScan_Virus > 0) {
+   print "\n\t" . $MailScan_Virus . ' Viruses found by MailScanner';
+}
+
+if ($MailScan_Other > 0) {
+   print "\n\t" . $MailScan_Other . ' Banned attachments found by MailScanner';
+}
+
+if ($MailScan_Content > 0) {
+   print "\n\t" . $MailScan_Content . ' Content Problems found by MailScanner';
+}
+
+if ($MailScan_Deleted_pdb > 0) {
+   print "\n\t" . $MailScan_Deleted_pdb . " Messages deleted from processing-database";
+}
+if ($MailScan_Found_pdb > 0) {
+   print "\n\t" . $MailScan_Found_pdb . " Messages found in processing-database";
+}
+if ($MailScan_Delivered > 0) {
+   print "\n\t" . $MailScan_Delivered . " Messages delivered by MailScanner\n";
+}
+
+if ($MailWatchSQL > 0) {
+   print "\n\t" . $MailWatchSQL . " Messages logged to MailWatch database\n";
+}
+
+if ($SA_timeout > 0) {
+   print "\n\t" . $SA_timeout . " SpamAssassin timeout(s)\n";
+}
+
+if (keys %VirusScannerTimeout) {
+   print "\n\t" . $MailScan_ScannerTimeout . " virus scanner timeout(s)\n";
+   foreach $ThisOne (sort keys %VirusScannerTimeout) {
+      print "\t    " . $ThisOne . ": " . $VirusScannerTimeout{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %VirusType_Antivir) {
+   print "\nAntivir Virus Report: (Total Seen = $MailScan_Virus_Antivir)\n";
+   foreach $ThisOne (sort keys %VirusType_Antivir) {
+      print '    ' . $ThisOne . ': ' . $VirusType_Antivir{$ThisOne} . " Times(s)\n";
+   }
+}
+
+if (keys %VirusType_BitDefender) {
+   print "\nBitDefender Virus Report: (Total Seen = $MailScan_Virus_BitDefender)\n";
+   foreach $ThisOne (sort keys %VirusType_BitDefender) {
+      print '    ' . $ThisOne . ': ' . $VirusType_BitDefender{$ThisOne} . " Times(s)\n";
+   }
+}
+
+if (keys %VirusType_ClamAv) {
+   print "\nClamAV Virus Report: (Total Seen = $MailScan_Virus_ClamAv)\n";
+   foreach $ThisOne (sort keys %VirusType_ClamAv) {
+      print '    ' . $ThisOne . ': ' . $VirusType_ClamAv{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %VirusType_ClamAVModule) {
+   print "\nClamAVModule Virus Report: (Total Seen = $MailScan_Virus_ClamAVModule)\n";
+   foreach $ThisOne (sort keys %VirusType_ClamAVModule) {
+   print '    ' . $ThisOne . ': ' . $VirusType_ClamAVModule{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %VirusType_Clamd) {
+   print "\nClamd Virus Report: (Total Seen = $MailScan_Virus_Clamd)\n";
+   foreach $ThisOne (sort keys %VirusType_Clamd) {
+   print '    ' . $ThisOne . ': ' . $VirusType_Clamd{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %VirusType_Fprot) {
+   print "\nF-Prot Virus Report: (Total Seen = $MailScan_Virus_Fprot)\n";
+   foreach $ThisOne (sort keys %VirusType_Fprot) {
+      print '    ' . $ThisOne . ': ' . $VirusType_Fprot{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %VirusType_Kaspersky) {
+   print "\nKaspersky Virus Report: (Total Seen = $MailScan_Virus_Kaspersky)\n";
+   foreach $ThisOne (sort keys %VirusType_Kaspersky) {
+      print '    ' . $ThisOne . ': ' . $VirusType_Kaspersky{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %VirusType_McAfee) {
+   print "\nMcAfee Virus Report: (Total Seen = $MailScan_Virus_McAfee)\n";
+   foreach $ThisOne (sort keys %VirusType_McAfee) {
+      print '    ' . $ThisOne . ': ' . $VirusType_McAfee{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %VirusType_Sophos) {
+   print "\nSophos Virus Report: (Total Seen = $MailScan_Virus_Sophos)\n";
+   foreach $ThisOne (sort keys %VirusType_Sophos) {
+      print '    ' . $ThisOne . ': ' . $VirusType_Sophos{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %VirusType_SophosSavi) {
+   print "\nSophosSavi Virus Report: (Total Seen = $MailScan_Virus_SophosSavi)\n";
+   foreach $ThisOne (sort keys %VirusType_SophosSavi) {
+   print '    ' . $ThisOne . ': ' . $VirusType_SophosSavi{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %Spam_Virus_Found) {
+   print "\nSpam Virus Report: (Total Seen = $MailScan_Spam_Virus)\n";
+   foreach $ThisOne (sort keys %Spam_Virus_Found) {
+      print '    ' . $ThisOne . ': ' . $Spam_Virus_Found{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %Hostlist) {
+   print "\nVirus Sender Report: (Total Seen = $MailScan_VirualHost)\n";
+   foreach $ThisOne (sort keys %Hostlist) {
+      print '    ' . $ThisOne . ': ' . $Hostlist{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %Whitelisted_Host) {
+   print "\nSpam Whitelisted Host Report: (Total Seen = $MailScan_Whitelisted)\n";
+   foreach $ThisOne (sort keys %Whitelisted_Host) {
+   print '    ' . $ThisOne . ': ' . $Whitelisted_Host{$ThisOne} . " Time(s)\n";
+   }
+}
+
+
+if (keys %Blacklisted_Host) {
+   print "\nSpam Blacklisted Host Report: (Total Seen = $MailScan_Blacklisted)\n";
+   foreach $ThisOne (sort keys %Blacklisted_Host) {
+      print '    ' . $ThisOne . ': ' . $Blacklisted_Host{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %RBLType) {
+   print "\nRBL Report: (Total Seen = $MailScan_RBL)\n";
+   foreach $ThisOne (sort keys %RBLType) {
+      print '    ' . $ThisOne . ': ' . $RBLType{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %ContentType) {
+   print "\nContent Report: (Total Seen = $MailScan_Content)";
+   if ($DisarmedQuarantined > 0) { print " (Quarantined = $DisarmedQuarantined)"; }
+   print "\n";
+   foreach $ThisOne (sort keys %ContentType) {
+      print '    ' . $ThisOne . ': ' . $ContentType{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %FilenameAllow) {
+   print "\nAllowed Filename Report: (Total Seen = $MailScan_FilenameAllow)\n";
+   if ($Detail >= 10) {
+      foreach $ThisOne (sort keys %FilenameAllow) {
+         print '    ' . $ThisOne . ': ' . $FilenameAllow{$ThisOne} . " Time(s)\n";
+      }
+   } else {
+      print '    ' . "Details Suppressed at level $Detail. Level 10 required.\n";
+   }
+}
+
+if (keys %FilenameType) {
+   print "\nBanned Filename Report: (Total Seen = $MailScan_FilenameBanned)\n";
+   foreach $ThisOne (sort keys %FilenameType) {
+      print '    ' . $ThisOne . ': ' . $FilenameType{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %FiletypeAllow) {
+   print "\nAllowed Filetype Report: (Total Seen = $MailScan_FiletypeAllow)\n";
+   if ($Detail >= 10) {
+      foreach $ThisOne (sort keys %FiletypeAllow) {
+         print '    ' . $ThisOne . ': ' . $FiletypeAllow{$ThisOne} . " Time(s)\n";
+      }
+   } else {
+      print '    ' . "Details Suppressed at level $Detail. Level 10 required.\n";
+   }
+}
+
+if (keys %FiletypeType) {
+   print "\nBanned Filetype Report: (Total Seen = $MailScan_FiletypeBanned)\n";
+   foreach $ThisOne (sort keys %FiletypeType) {
+      print '    ' . $ThisOne . ': ' . $FiletypeType{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if ( (keys %PhishingSource) && ($mailscanner_phishingthreshold > 0) ) {
+   print "\nPhishing Report: (Total Seen = $MailScan_Phishing)\n";
+   foreach $ThisOne (sort keys %PhishingSource) {
+      if ( $PhishingSource{$ThisOne} >= $mailscanner_phishingthreshold ) {
+         print '    ' . $ThisOne . ': ' . $PhishingSource{$ThisOne} . " Time(s)\n";
+      }
+   };
+   if ($Detail >= 10) {
+      print "\n  Detail:\n";
+      foreach $ThisOne (sort keys %PhishingSourceDest) {
+         if ( $PhishingSourceDest{$ThisOne} >= $mailscanner_phishingthreshold ) {
+            print '    ' . $ThisOne . ': ' . $PhishingSourceDest{$ThisOne} . " Time(s)\n";
+         }
+      }
+   }
+}
+
+if (keys %FormTagSource) {
+   print "\nHTML <FORM> tag report: (Total Seen = $MailScan_FormTag)\n";
+   foreach $ThisOne (sort keys %FormTagSource) {
+      print '    ' . $ThisOne . ': ' . $FormTagSource{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %ScriptTagSource) {
+   print "\nHTML <SCRIPT> tag report: (Total Seen = $MailScan_ScriptTag)\n";
+   foreach $ThisOne (sort keys %ScriptTagSource) {
+      print '    ' . $ThisOne . ': ' . $ScriptTagSource{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %IframeTagSource) {
+   print "\nHTML <IFRAME> tag report: (Total Seen = $MailScan_IframeTag)\n";
+   foreach $ThisOne (sort keys %IframeTagSource) {
+      print '    ' . $ThisOne . ': ' . $IframeTagSource{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %ObjectTagSource) {
+   print "\nHTML <OBJECT> tag report: (Total Seen = $MailScan_ObjectTag)\n";
+   foreach $ThisOne (sort keys %ObjectTagSource) {
+      print '    ' . $ThisOne . ': ' . $ObjectTagSource{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %ImgTagSource) {
+   print "\nHTML <IMG> tag report: (Total Seen = $MailScan_ImgTag)\n";
+   if ($Detail >= 10) {
+      foreach $ThisOne (sort keys %ImgTagSource) {
+         print '    ' . $ThisOne . ': ' . $ImgTagSource{$ThisOne} . " Time(s)\n";
+      }
+   } else {
+      print '    ' . "Details Suppressed at level $Detail. Level 10 required.\n";
+   }
+}
+if ($SpamAssassin_Rule_Actions > 0) {
+   print "\nSpamAssassin Rule Actions: (Total Seen = $SpamAssassin_Rule_Actions)\n";
+      foreach $ThisOne (sort keys %SpamAssassin_Rule) {
+         print '    ' . 'Rule - ' . $ThisOne . ': ' . $SpamAssassin_Rule{$ThisOne} . " Time(s)\n";
+      }
+      foreach $ThisOne (sort keys %SpamAssassin_Action) {
+         print '    ' . 'Action - ' . $ThisOne . ': ' . $SpamAssassin_Action{$ThisOne} . " Time(s)\n";
+      }
+      foreach $ThisOne (sort keys %SpamAssassin_Message) {
+         print '    ' . 'Message - ' . $ThisOne . ': ' . $SpamAssassin_Message{$ThisOne} . " Time(s)\n";
+      }
+}
+
+if ( ($MailScan_GoodWatermark > 0) || ($MailScan_BadWatermark > 0) || ($MailScan_Skipwatermark > 0) ) {
+   print "\nWatermark report:\n";
+   print "    Messages with null sender and valid watermark: $MailScan_GoodWatermark\n";
+   print "    Messages with null sender and bad or no watermark: $MailScan_BadWatermark\n";
+   print "    Messages with valid watermark skipping spam checks: $MailScan_Skipwatermark\n";
+}
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $line (sort {$OtherList{$b}<=>$OtherList{$a} } keys %OtherList) {
+      print "   $line: $OtherList{$line} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

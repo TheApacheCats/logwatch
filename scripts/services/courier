@@ -1,0 +1,737 @@
+# Copyright 2003-2006 by Willi Mann <willi@wm1.at>
+###########################################################################
+# $Id: courier,v 1.18 2008/06/30 20:47:20 kirk Exp $
+###########################################################################
+# $Log: courier,v $
+# Revision 1.18  2008/06/30 20:47:20  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.17  2008/05/06 22:30:50  mike
+# Fix for port= in login count -mgt
+#
+# Revision 1.16  2008/05/04 23:24:10  mike
+# Dos2unixed -mgt
+#
+# Revision 1.15  2007/02/16 04:15:52  bjorn
+# Using default license for Logwatch, per Willi Mann.
+#
+###########################################################################
+#
+# Please don't change the formatting:
+#
+# if (...) {
+#    ...
+# }
+#
+# but
+#
+# (while|foreach) ..
+# {
+#    ...
+# }
+#
+
+#######################################################
+### Copyright 2003-2006 by Willi Mann <willi@wm1.at>
+### Covered under the included MIT/X-Consortium License:
+###    http://www.opensource.org/licenses/mit-license.php
+### All modifications and contributions by other persons to
+### this script are assumed to have been donated to the
+### Logwatch project and thus assume the above copyright
+### and licensing terms.  If you want to make contributions
+### under your own copyright or a different license this
+### must be explicitly stated in the contribution an the
+### Logwatch project reserves the right to not accept such
+### contributions.  If you have made significant
+### contributions to this script and want to claim
+### copyright please contact logwatch-devel@lists.sourceforge.net.
+##########################################################
+
+use strict;
+
+#Could be neccessary in some environments
+unless ($ENV{'courier_enable'} == 1) {exit 0};
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'};
+my $DoLookup = $ENV{'courier_ip_lookup'};
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'};
+my $overrideDetail = $ENV{'courier_override_detail_level'};
+my $printAllUnmatched = $ENV{'courier_print_all_unmatched'};
+
+$Detail = $overrideDetail if defined $overrideDetail;
+
+
+my $PrintMailQueue = $ENV{'courier_printmailqueue'};
+my $Tables = $ENV{'courier_tables'};
+my $RemoveAdditionalInfo = $ENV{'courier_removeadditionalinfo'};
+my $MostFrequentSender = $ENV{'courier_mostfrequentsender'};
+
+my $DeliverMailSize = 0;
+my $LastLine;
+
+my %OtherList;
+
+
+sub LookupIP {
+   my ($name, $a1, $a2,$a3,$a4,$PackedAddr,$Addr);
+   $Addr = $_[0];
+   ($a1,$a2,$a3,$a4) = split /\./,$Addr;
+   $PackedAddr = pack('C4',$a1,$a2,$a3,$a4);
+   if ($DoLookup) {
+      if ($name = gethostbyaddr ($PackedAddr,2)) {
+         return ($name . " (" . $Addr . ")");
+      } else {
+         return ($Addr);
+      }
+   }
+   else {
+      return ($Addr);
+   }
+}
+
+#Make pseudo IPv6 to IPv4
+sub LookupIPv46 {
+   my $IPv4Addr;
+   my $Addr = shift;
+   if ( ($IPv4Addr) = ($Addr =~ /::ffff:([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/ ) ) {
+      return $IPv4Addr;
+   }
+   else {
+      return $Addr;
+   }
+}
+
+sub PushUnmatched
+{
+   my $service = shift;
+   my $line = shift;
+   if ( $printAllUnmatched or $service =~ /courier/ or $service =~ /^authdaemon/ ) {
+      $OtherList{$service}{$line}++;
+   }
+}
+
+sub recprint1
+{
+   my $hash = shift;
+   my $depth = shift;
+   my $prefar = shift;
+   my $IPar  = shift;
+   my $indention = shift || 0;
+   my $calldepth = shift || $depth;
+   my $sizehash = shift;
+   my $out = "";
+   my $inum = 0;
+   my $size = 0;
+
+   my @prefar = @{$prefar} if defined $prefar;
+   my $pref = shift(@prefar);
+   $pref .= " " if defined $pref;
+   $pref = "" if not defined $pref;
+
+   my @IPar = @{$IPar} if defined $IPar;
+   my $IP = shift(@IPar);
+
+   foreach my $key1 (sort keys %{$hash})
+   {
+      my ( $rout, $nmb, $rsize);
+      if ($depth > 1) {
+         ($rout, $nmb, $rsize) = recprint1($hash->{$key1}, $depth - 1, \@prefar, \@IPar, $indention + 3, $calldepth, defined $sizehash ? $sizehash->{$key1} : undef) if $depth > 1;
+      } else {
+         $rout = "";
+         $nmb = $hash->{$key1};
+         $rsize = $sizehash->{$key1} if defined $sizehash;
+      }
+      if ($key1 ne "-" or $rout ne "") {
+         $out .= (" " x $indention).$pref;
+         if ($IP) {
+            $out .= LookupIP(LookupIPv46($key1));
+         } else {
+            $out .= $key1;
+         }
+         $out .= " - ".nTimes($nmb);
+         $out .= ", ".$rsize." Bytes" if defined $sizehash;
+         $out .= "\n";
+         $out .= $rout;
+      }
+      $out .= "\n" if $depth == $calldepth;
+      $inum += $nmb;
+      $size += $rsize;
+   }
+   if (wantarray) {
+      return ($out, $inum, $size);
+   } else {
+      return $out;
+   }
+}
+
+sub tblprint1
+{
+   my $hash = shift;
+   my $sizehash = shift;
+   my $onerec = shift || 0; #boolean
+   my $IP = shift || 0; #boolean
+   my $onerectitle = shift || "";
+   my $tablecolumns  = shift; #LISTREF
+   my $tabletitle = shift || "";
+   if (not $onerec){
+      return maketbl1($hash, $sizehash, $IP, $tablecolumns, $tabletitle);
+   } else {
+      my ( $out, $nmb, $size ) = ("", 0,0);
+      my ( $lout, $lnmb, $lsize);
+
+      foreach my $key1 (sort keys %{$hash})
+      {
+         ($lout, $lnmb, $lsize) = maketbl1($hash->{$key1}, defined $sizehash ? $sizehash->{$key1} : undef, $IP, $tablecolumns, undef, "-");
+         if ($onerectitle) {
+            $out .= "$onerectitle: $key1\n";
+            $out .= "-" x (2 + length($onerectitle) + length($key1))."\n";
+         } else {
+            $out .= "$key1\n";
+            $out .= "-" x (length($key1))."\n";
+         }
+
+         $out .= $lout;
+         $nmb += $lnmb;
+         $size += $lsize;
+      }
+      if ($tabletitle) {
+         my $tout = $tabletitle;
+         $tout .= ", ".nTimes($nmb);
+         $tout .= ", ".$size." Bytes" if defined $sizehash;
+         $tout .= "\n"."=" x length($tabletitle)."\n\n";
+         $out = $tout.$out;
+      }
+
+      return ($out, $nmb, $size);
+   }
+
+}
+
+sub max
+{
+   my $ret = shift;
+   foreach my $val (@_)
+   {
+      $ret = $val if $val > $ret;
+   }
+   return $ret;
+}
+
+
+sub maketbl1
+{
+   my $hash = shift;
+   my $sizehash = shift;
+   my $IP = shift || 0; #boolean
+   my $tablecolumns = shift; #LISTREF
+   my $tabletitle = shift;
+   my $uchar = shift || "=";
+   my @columnmax;
+   my $out = "";
+   my $inmb = 0;
+   my $size = 0;
+   foreach my $column (@{$tablecolumns})
+   {
+      push @columnmax, length("$column");
+   }
+   # Get the max length for column 1, ("main")
+   #                        column 2, ("number")
+   #                        column 3, ("size")
+   # TODO: Enhance; max can take any number of arguments, so make use of that
+   # (maybe it turns out to be a bad idea)
+   my %IPhash;
+   foreach my $key1 (keys %{$hash})
+   {
+      if ($IP) {
+         $IPhash{$key1} = LookupIP(LookupIPv46($key1));
+         $columnmax[0] = max ($columnmax[0], length($IPhash{$key1}));
+      } else {
+         $columnmax[0] = max ($columnmax[0], length("$key1"));
+      }
+      $columnmax[1] = max ($columnmax[1], length($hash->{$key1}));
+      $inmb += $hash->{$key1};
+      $columnmax[2] = max ($columnmax[2], length($sizehash->{$key1})) if defined $sizehash;
+      $size += $sizehash->{$key1} if defined $sizehash;
+   }
+   #for last line
+   $columnmax[1] = max $columnmax[1], length $inmb;
+   $columnmax[2] = max $columnmax[2], length $size;
+
+   if (defined $tabletitle) {
+      $out .= "$tabletitle\n";
+      $out .= $uchar x length($tabletitle)."\n";
+   }
+   #first line
+   $out .= " " x ($columnmax[0] - length($tablecolumns->[0])).$tablecolumns->[0];
+   $out .= " | ";
+   $out .= " " x ($columnmax[1] - length($tablecolumns->[1])).$tablecolumns->[1];
+   $out .= " | " if defined $sizehash;
+   $out .= " " x ($columnmax[2] - length($tablecolumns->[2])).$tablecolumns->[2] if defined $sizehash;
+   $out .= "\n";
+
+   #second line
+   $out .= "-" x $columnmax[0]. " | ".
+           "-" x $columnmax[1];
+   $out .= " | ". "-" x $columnmax[2] if defined $sizehash;
+   $out .= "\n";
+
+   #tablebody
+   foreach my $key1 (sort keys %{$hash})
+   {
+      my $nmb = $hash->{$key1};
+      #col1
+      #whitespace
+      if ($IP) {
+         $out .= " " x ($columnmax[0] - length($IPhash{$key1}));
+         $out .= $IPhash{$key1};
+      } else {
+         $out .= " " x ($columnmax[0] - length($key1));
+         $out .= $key1;
+      }
+      $out .= " | ";
+
+      #col2
+      $out .= " " x ($columnmax[1] - length($nmb)). $hash->{$key1};
+      if (defined $sizehash) {
+         $out .= " | ". " " x ($columnmax[2] - length($sizehash->{$key1})).$sizehash->{$key1};
+      }
+      $out .= "\n";
+   }
+
+   #second line (copied from above, if someone has a better idea, tell me.)
+   $out .= "-" x $columnmax[0]. " | ".
+           "-" x $columnmax[1];
+   $out .= " | ". "-" x $columnmax[2] if defined $sizehash;
+   $out .= "\n";
+
+   #last line
+   $out .= " " x ($columnmax[0] + 3 + $columnmax[1] - length($inmb)). $inmb;
+   $out .= " " x ($columnmax[2] + 3 - length($size) ). $size if defined $sizehash;
+
+   $out .= "\n\n";
+
+   return ($out, $inmb, $size);
+}
+
+sub MakeTblReason {
+   my $OrigReason = shift;
+   my $TblReason;
+   if (
+      (!(( $TblReason) = ( $OrigReason =~ /^(".*?").*/ ))  and
+         (!(( $TblReason) = ( $OrigReason =~ /^(.*?): .*/ )))) or
+      !($RemoveAdditionalInfo)
+   ) {
+      $TblReason = $OrigReason;
+   }
+   return $TblReason;
+}
+
+sub nTimes
+{
+   my $nmb = shift;
+   if ($nmb == 1) {
+      return "1 Time";
+   } else {
+      return "$nmb Times";
+   }
+}
+
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside Courier Filter \n\n";
+}
+
+#List vars here to avoid case-sensitive typos
+
+my $AuthdRestart;
+my $BrokenPipe;
+my %Connection;
+my %ConnTimeout;
+my $ConResetBP;
+my %Deferred;
+my %DeSu;
+my %DeSuSz;
+my %DeSuTbl;
+my %DeSuTblSz;
+my %DfrdTbl;
+my %ErrorMsgs;
+my %ErrorTbl;
+my %ErrorTbl2;
+my %Failed;
+my %FailRe;
+my $From;
+my $Host;
+my $ID;
+my $LastSMTPErrCode;
+my %Login;
+my %LoginFailed;
+my %Logout;
+my %Logout2;
+my %LogoutSize;
+my %LogoutSize2;
+my $RespawnCourier;
+my $ShutdownCourier;
+my $Size;
+my $SSLstop;
+my $StartCourier = 0;
+my $Startpfilter;
+my $StopCourier = 0;
+my $Stoppfilter;
+my $ThisLine;
+my $To;
+my $User;
+my $service;
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp $ThisLine;
+   my $Size2 = 0;
+   my $Size  = 0;
+   #TODO: Make this more accurrate (expand to \d+ times)
+   if ( $ThisLine =~ /^... .. ..:..:.. \S+ last message repeated \d+ times/ ) {
+      $ThisLine = $LastLine;
+   } else {
+      if (not (($service ) = ( $ThisLine =~ /^... .. ..:..:.. \S+ ([^\s:\[\]]+)(?:\[[0-9]+\]|): / ))) {
+         next;
+      }
+      $ThisLine = $'; #$POSTMATCH
+   }
+   if (
+      ($ThisLine =~ /^Initializing */) or
+      ($ThisLine =~ /^Installing */) or
+      ($ThisLine =~ /^Installed: */) or
+      ($ThisLine =~ /^Installation complete: / ) or
+      ($ThisLine =~ /^stopping authdaemond children/ ) or
+      ($ThisLine =~ /^Started .\/courier.*, pid=.*, maxdels=.*, maxhost=.*, maxrcpt=.*1/ ) or
+      ($ThisLine =~ /^Waiting\.  shutdown time=.*, wakeup time=.*, queuedelivering=.*, inprogress=.*/) or
+      ($ThisLine =~ /^Loading STATIC transport module libraries./) or
+      ($ThisLine =~ /^Purging /) or
+      ($ThisLine =~ /^completed,id=/) or
+      ($ThisLine =~ /^queuelo=.*, queuehi=.*/) or
+      # Do we really want to ignore these?
+      # currently i'm too lazy to include this
+      ($ThisLine =~ /^started,ip=.*/) or ##courieresmtpd
+      #   example line:
+      #   id=00081D7A.3E9E0C51.000037A4,from=<r@rrg.ac.at>,addr=<u.u@u.at>,size=53223,status: success: 1 Time(s)
+
+      ($ThisLine =~ /id=.*?,from=<.*?>,addr=<.*?>,size=[0-9]*,status:.*/) ##courieresmtp
+   ) {
+      # Don't care about these...
+   }
+   # ESMTP, including all delivery
+   elsif ( $service =~ /^(courierd|courieresmtpd|courieresmtp|courierlocal|courieruucp|courierfax|courierdsn)$/ ){
+      #First the don't cares
+      if ( $ThisLine =~ /^newmsg,id=/ ) {
+      } elsif ( $ThisLine =~ /started,id=.*?,from=<(.*?)>,module=(.*?),host=(.*?),addr=<(.*?)>/ ) {
+      #Now starting, restarting ...
+      } elsif ( $ThisLine =~ /^Courier .* Copyright/ ) {
+         $StartCourier++;
+      } elsif ( $ThisLine =~ /^SHUTDOWN: respawnlo limit reached/ ) {
+         $RespawnCourier++;
+      } elsif ( $ThisLine =~ /^SHUTDOWN: Stopping.../ ) {
+         $StopCourier++;
+      #Now it's getting interesting
+      } elsif ( ($Host) = ( $ThisLine =~ /^error,relay=([^,]*?),/ ) ) {
+      ##courieresmtpd
+      # example lines:
+      # error,relay=::ffff:209.214.170.188,from=<kuebabysus@netzero.net>,to=<amber3624@netzero.net>: 513 Relaying denied.
+      # error,relay=::ffff:218.70.112.124,from=<bss@fre.sg.co.nz>: 517 Invalid domain, see <URL:ftp://ftp.isi.edu/in-notes/rfc1035.txt>
+      # error,relay=::ffff:62.67.54.144,msg="502 ESMTP command error",cmd: DATA
+
+         $ThisLine = $';
+         my ( $From ,$To, $Msg ) = (undef, undef, undef);
+
+         if ( $ThisLine =~ /^ident=[^,]*,/ ) {
+            $ThisLine = $';
+         }
+         if ( ($From) = ( $ThisLine =~ /^from=<([^<>]*?)>(:?,|)/ )) {
+            $ThisLine = $';
+         }
+         if (( $To ) = ( $ThisLine =~ /^to=<([^<>]*?)>/ ) ) {
+            $ThisLine = $';
+         }
+         if (( $Msg ) = ( $ThisLine =~ /^msg=(.*)/ )) { }
+
+         $ThisLine =~ s/^: //;
+
+         #Extract it
+         my ($SMTPErrCode) = ($ThisLine =~ /^([0-9]{3})/);
+
+         # next if already seen
+         if($ThisLine =~ /^[0-9]{3} / and $LastSMTPErrCode == $SMTPErrCode) {
+            $LastSMTPErrCode = 0;
+            next;
+         }
+
+         #next if already seen but not last line.
+         next if $LastSMTPErrCode == $SMTPErrCode and not defined $Msg;
+
+         my $Reason = $ThisLine;
+         $Reason = $Msg if defined $Msg;
+
+         $ErrorMsgs{$Reason}{$Host}{$From || "-"}{$To || "-"}++ if not $Tables;
+         my $TblReason = MakeTblReason($Reason) if $Tables;
+         $ErrorTbl{$TblReason}{$Host}++ if $Tables;
+
+         $LastSMTPErrCode = $SMTPErrCode;
+
+         #zero it if done
+         $LastSMTPErrCode = 0 if $ThisLine =~ /^[0-9]{3} / or defined $Msg;
+
+      } elsif ( ($From, $To, $Size) = ( $ThisLine =~
+                 /^id=.*?,from=<(.*?)>,addr=<(.*?)>,size=([0-9]*),success: .*/ ) ) { ##courieresmtp, courierlocal
+         #example line:
+         #id=00081D7A.3E9E0B39.000036E4,from=<u@ttt.at>,addr=<aa@aa.at>,size=35861,success: delivered: ff.ff.at [111.111.111.111]
+         #DeliverSuccess = DeSu !!!!!!!!
+
+         $DeSu{$From}{$To}++;
+         $DeSuSz{$From}{$To} += $Size;
+         $DeSuTbl{$To}++;
+         $DeSuTblSz{$To} += $Size;
+
+       } elsif ( ($ID, $From, $To, my $status) = ( $ThisLine =~
+               /^id=(.*),from=<(.*?)>,addr=<(.*?)>,status: (deferred|failure)/ ) ) { ##courieresmtp
+         #example lines: deferred, failed delivery attempts
+         #id=00081D03.3E850D34.000076BD,from=<oo@oo.at>,addr=<uu@uu.at>,status: deferred
+         #id=00081D7B.3E9167E7.00002B27,from=<bb@bb.at>,addr=<rr@rr.at>,status: failure
+
+         my $Reason = $FailRe{$ID}{$From}{$To};
+         if ($Reason eq "") {
+            $Reason = "-";
+         }
+         my $TblReason = MakeTblReason($Reason);
+
+         if ( $status =~ /deferred/ ){
+            $Deferred{$Reason}{$From}{$To}++;
+            $DfrdTbl{$TblReason}{$To}++;
+         } else { #failure
+            $Failed{$Reason}{$From}{$To}++;
+            $ErrorTbl2{$TblReason}{$To}++;
+         }
+      } elsif ( ($ID, $From, $To, my $Reason) = ( $ThisLine =~ /^id=(.*?),from=<(.*?)>,addr=<(.*?)>:(.*)/ ) ) { ##courierd, courieresmtp
+         #example line:
+         #id=00079ED0.3E8A45E7.000042AF,from=<rr@rrr.at>,addr=<aaa@aaa.at>: Connection timed out
+         #id=00079ED0.3E975385.00005B66,from=<zz@zz.at>,addr=<ii@ii.at>: DNS lookup failed.
+         #This is for the following lines to have the reason for failed or deferred.
+
+         $FailRe{$ID}{$From}{$To} = $Reason;
+      } elsif ( $ThisLine =~ /^Unexpected SSL connection shutdown./ ) {
+         $SSLstop++;
+      } elsif ( $ThisLine =~ /^writev: Broken pipe/ ) {
+         $BrokenPipe++;
+      } elsif ( $ThisLine =~ /^writev: Connection reset by peer/ ) {
+         $ConResetBP++;
+      } elsif ( ( $Host ) = ( $ThisLine =~ /^\[([^\]]*)\]: Connection timed out/ )) {
+         $ConnTimeout{$Host}++;
+      } else {
+         PushUnmatched $service, $ThisLine;
+      }
+   } elsif ( $service =~  /^authdaemond/ ) {
+      if ( $ThisLine =~ /^modules="[^"]*", daemons=\d*$/ ) {
+         # Ignore
+      } elsif ( $ThisLine =~ /^restarting authdaemond children/ ) {
+         $AuthdRestart++;
+      } else {
+         PushUnmatched $service, $ThisLine;
+      }
+   } elsif ( $service =~ /^submit$/ ) {
+      if ( $ThisLine =~ /^Broken pipe/ ) {
+         $BrokenPipe++;
+      } elsif ( $ThisLine =~ /^Connection reset by peer/ ) {
+         $ConResetBP++;
+      } else {
+         PushUnmatched $service, $ThisLine;
+      }
+   } elsif ( $service =~ /^courierfilter$/ ) {
+      if ( $ThisLine =~ /^Starting perlfilter/ ) {
+         $Startpfilter++;
+      } elsif ( $ThisLine =~ /^Stopping perlfilter/ ) {
+         $Stoppfilter++;
+      } else {
+         PushUnmatched $service, $ThisLine;
+      }
+   } elsif ( $service =~ /^(:?pop3login|imaplogin|courierpop3login|pop3d|pop3d-ssl|imapd|imapd-ssl)$/ ) {
+      my $proto = $service;
+      $proto =~ s/.*pop.*/POP3/i;
+      $proto =~ s/.*imap.*/IMAP/i;
+      if  ( ($Host) = ( $ThisLine =~ /^Connection, ip=\[(.*?)\]/ ) ) { ##pop3login, imaplogin, courierpop3login, pop3d, imapd
+         #example line pop3, imapd??
+         #Connection, ip=[::ffff:192.168.0.24]
+
+         $Connection{$proto}{$Host}++;
+      } elsif ( ($User, $Host) = ( $ThisLine =~ /^LOGIN, user=(.*?), ip=\[(.*?)\]/ ) ) { ##pop3login, imaplogin, courierpop3login, pop3d, imapd
+
+         #example line
+         #LOGIN, user=xy, ip=[::ffff:192.168.0.12]
+
+         $Login{$proto}{$User}{$Host}++;
+      } elsif (
+         ( ( $User, $Host, $Size) = ( $ThisLine =~
+               /^LOGOUT, user=(.*?), ip=\[(.*?)\], (?:port=\[\d+\], )?(?:top|headers)=[0-9]*, (?:retr|body)=([0-9]*)/ ) ) ||
+         ( ( $User, $Host, $Size, $Size2) = ( $ThisLine =~
+               /^DISCONNECTED, user=(.*?), ip=\[(.*?)\], headers=([0-9]*?), body=([0-9]*)/ ) )
+         ) {  ###pop3login, imaplogin, courierpop3login, pop3d, imapd
+         #example line
+         #LOGOUT, user=xy, ip=[::ffff:192.168.0.24], top=0, retr=0
+         #DISCONNECTED, user=zz@uu.ch, ip=[::ffff:192.168.0.1], headers=0, body=1100
+
+         $Size += $Size2 if defined $Size2;
+
+         $Logout{$proto}{$User}{$Host}++;
+         $Logout2{$proto}{$User}++;
+         $LogoutSize{$proto}{$User}{$Host} += $Size;
+         $LogoutSize2{$proto}{$User} += $Size;
+      } elsif ( ($Host) = ( $ThisLine =~ /^LOGIN FAILED, ip=\[(.*?)\]/ ) ) { ## pop3login, imaplogin, courierpop3login, pop3d, imapd
+         #example line
+         #LOGIN FAILED, ip=[::ffff:192.168.200.199]
+
+         $LoginFailed{$proto}{$Host}++;
+      } else {
+         PushUnmatched $service, $ThisLine;
+      }
+   } else {
+      # Report any unmatched entries...
+
+      PushUnmatched $service, $ThisLine;
+   }
+   $LastLine = $ThisLine;
+}
+
+if ( ( $Detail >= 5 ) and ($PrintMailQueue ) ) {
+   print "\n\n\nCurrent State of the Mail Queue:\n".
+   "================================\n\n";
+   my $MailqPath = `which mailq` || "/usr/bin/mailq";
+   chomp $MailqPath;
+   if (-x $MailqPath) {
+      print `$MailqPath`;
+      print "\n\n";
+   }
+}
+
+#StartCourier ...
+if ( $Detail >= 5 )
+{
+   my $SelfRestart = $RespawnCourier;
+   print "Courier restarted itself              ".nTimes($SelfRestart)."\n" if $SelfRestart;
+   my $HandStart = $StartCourier - $SelfRestart;
+   print "Courier was started by hand (or init) ".nTimes($HandStart)."\n" if $HandStart;
+   my $HandStop = $StopCourier;
+   print "Courier was stopped by hand (or init) ".nTimes($HandStop)."\n" if $HandStop;
+   print "The authdaemon was restarted          ".nTimes($AuthdRestart)."\n" if $AuthdRestart;
+   print "\n" if $RespawnCourier + $StartCourier + $StopCourier > 0;
+}
+
+print "Unexpected SSL connection shutdowns: ".nTimes($SSLstop)."\n" if $SSLstop;
+print "Broken Pipes:                        ".nTimes($BrokenPipe)."\n" if $BrokenPipe;
+print "Connection Reset by Peer:            ".nTimes($ConResetBP)."\n" if $ConResetBP;
+
+if ( keys %ConnTimeout ) {
+   my ($out, $nmb)  = recprint1(\%ConnTimeout, 1, [ "Host" ], [1], 2, 2);
+   print "\nConnections timed out: ".nTimes($nmb)."\n";
+   print $out."\n";
+}
+
+if ( ( $Detail >= 5 ) and (keys %Connection) and (!$Tables)) {
+   my ($out, $nmb) = recprint1(\%Connection, 2, [ "Protocol", "Host" ], [0,1], 2);
+   print "\nConnections: ".nTimes($nmb)."\n";
+   print $out."\n";
+}
+
+if ( ( $Detail >= 5 ) and (keys %Connection) and ($Tables)) {
+   my ( $out, $nmb, $size)  = tblprint1(\%Connection, undef, 1, 1, "Connections", [ "Host", "#" ], "");
+   print $out;
+}
+
+
+if ( ( $Detail >= 0 ) and (keys %LoginFailed) and ($Tables)) {
+   my ( $out, $nmb, $size)  = tblprint1(\%LoginFailed, undef, 1, 1, "Login Failures", [ "Host", "#" ], "");
+   print "\n".$out;
+}
+
+if ( ( $Detail >= 0 ) and (keys %LoginFailed) and (!$Tables)) {
+   my ($out, $nmb) = recprint1(\%LoginFailed, 2, [ "Protocol", "Host" ], [0,1], 2);
+   print "\nLogin Failed: ".nTimes($nmb)."\n";
+   print $out."\n";
+}
+
+
+if ( ( $Detail >= 5 ) and (keys %Logout2) and ($Tables)) {
+   my ( $out, $nmb, $size)  = tblprint1(\%Logout2, \%LogoutSize2, 1, 1, "Logins", [ "Host", "#", "Size" ], "");
+   print $out;
+}
+
+if ( ( $Detail >= 5 ) and (keys %Logout) and (!$Tables)) {
+   my ($out, $nmb) = recprint1(\%Logout, 3, [ "Protocol", "User", "Host" ], [0,0,1], 2, undef, \%LogoutSize);
+   print "\nLogins: ".nTimes($nmb)."\n";
+   print $out."\n";
+}
+#Fixme why have login and logout has print 2 login reports -mgt
+if ( ( $Detail >= 10 ) and (keys %Login) and (!$Tables)) {
+   my ($out, $nmb) = recprint1(\%Login, 3, [ "Protocol", "User", "Host" ], [0,0,1], 2, undef);
+   print "\nSuccessful Logins: ".nTimes($nmb)."\n";
+   print $out."\n";
+}
+
+
+if ( ( $Detail >= 0 ) and (keys %ErrorTbl) and ($Tables)) {
+   my ( $out, $nmb, $size)  = tblprint1(\%ErrorTbl, undef, 1, 1, "", [ "Host", "#" ], "Errors in remote to local connections");
+   print $out;
+}
+
+if ( ( $Detail >= 0 ) and (keys %ErrorMsgs) and (!$Tables) ) {
+   my ($out, $nmb) = recprint1 ( \%ErrorMsgs, 4, [ "because", "Host", "From", "To" ], [0,1,0,0], 2);
+   print "\nErrors in remote to local connections: ".nTimes($nmb)."\n\n";
+   print "$out\n";
+}
+
+
+if ( ( $Detail >= 0 ) and (keys %DfrdTbl) and ($Tables)) {
+   my ( $out, $nmb, $size)  = tblprint1(\%DfrdTbl, undef, 1, 0, "", [ "Recipient", "#" ], "Deferred delivery attempts");
+   print $out;
+}
+
+if ( ( $Detail >= 0 ) and (keys %Deferred) and (!$Tables)) {
+   my ($out, $nmb) = recprint1(\%Deferred, 3, [ "because", "From", "To" ], undef, 2,4);
+   print "\nDeferred delivery attempts: ".nTimes($nmb)."\n";
+   print $out;
+}
+
+
+if ( ( $Detail >= 0 ) and (keys %ErrorTbl2) and ($Tables)) {
+   my ( $out, $nmb, $size)  = tblprint1(\%ErrorTbl2, undef, 1, 0, "", [ "Recipient", "#" ], "Failed delivery attempts");
+   print $out;
+}
+
+if ( ( $Detail >= 0 ) and (keys %Failed) and (!$Tables)) {
+   my ($out, $nmb) = recprint1(\%Failed, 3, [ "because", "From", "To" ], undef, 2);
+   print "\nFailed delivery attempts: ".nTimes($nmb)."\n\n";
+   print "$out\n";
+}
+
+
+if ( ( $Detail >= 5 ) and (keys %DeSu) and (!$Tables) ) {
+   my ($out, $nmb, $size) = recprint1 ( \%DeSu, 2, [ "From", "To" ], [0,0], 2, undef, \%DeSuSz);
+   print "\n\nSuccessful deliveries: ".nTimes($nmb).", $size Bytes\n\n";
+   print "$out\n";
+}
+
+
+if ( ( $Detail >= 5 ) and (keys %DeSuTbl) and ($Tables)) {
+   my ( $out, $nmb, $size)  = tblprint1(\%DeSuTbl, \%DeSuTblSz, 0, 0, "", [ "Recipient", "#", "Size" ], "Successful deliveries");
+   print $out;
+}
+
+
+if (keys %OtherList)
+{
+   print "\n**Unmatched Entries**\n";
+   my $out = recprint1( \%OtherList, 2, undef,undef, 2);
+   print "$out\n";
+}
+
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

@@ -1,0 +1,133 @@
+
+##########################################################################
+# $Id: automount,v 1.17 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Gerald Teschl <gerald@esi.ac.at>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to kirk@kaybee.org.
+########################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+$MountAttempts = 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   if ( ($ThisLine =~ /^using kernel protocol version .*$/) or
+         ($ThisLine =~ /^expired .*$/) or
+         ($ThisLine =~ /^lookup\(ldap\): got answer, but no first entry for /) or
+         ($ThisLine =~ /^>>.*mount: .*$/) or
+         ($ThisLine =~ /lookup_read_master: lookup\(nisplus\): couldn't locate? nis\+ table auto.master/) or
+         ($ThisLine =~ /create_(tcp|udp)_client: hostname lookup failed: (No such process|Operation not permitted)/) or
+         ($ThisLine =~ /lookup_mount: exports lookup failed for .*directory/) or
+         ($ThisLine =~ /master_do_mount: failed to startup mount/)
+         ) {
+      # don't care about these
+   }
+   elsif ( ($ThisMount) = ($ThisLine =~ /^attempting to mount entry (.*)$/) ) {
+      # store Mount
+      #$Mount = $ThisMount; somthing is wrong with this -mgt
+      $MountAttempts++;
+   }
+   elsif ($ThisLine =~ /^mount\(nfs\): nfs: mount failure .*:.* on (.*)$/) {
+      $Failed{$1}{'nfsm'}++;
+   }
+   elsif ($ThisLine =~ /^mount\(nfs\): entry (.*) lookup failure$/) {
+      $Failed{$1}{'nfsl'}++;
+   }
+   elsif (( $ThisLine =~ /^mount\(generic\): failed to mount .* on (.*)$/)
+       or ( $ThisLine =~ /^handle_mounts: mount on (.*) failed!/)
+	) {
+      $Failed{$1}{'mnt'}++;
+   }
+   elsif ( $ThisLine =~ /^failed to mount \/(\w+).*$/) {
+      $Failed{$1}{'mnt'}++;
+   }
+   elsif ( ($ThisMount) = ( $ThisLine =~ /^(.*): mount failed!$/) ) {
+      $FailedStartup{$ThisMount}++;
+   }
+   elsif ( $ThisLine =~ /^lookup\((file|program)\): lookup for (.*) failed$/) {
+      $Failed{$2}{$1}++;
+   }
+   elsif ( ($ThisMount) = ($ThisLine =~ /^starting automounter version .* path = (.*), maptype = .*, mapname = .*$/) ) {
+      $StartStop{$ThisMount}{'start'}++;
+      $StartStop{$ThisMount}{'stop'}+=0;
+   }
+   elsif ( ($ThisMount) = ($ThisLine =~ /^shutting down, path = (.*)$/) ) {
+      $StartStop{$ThisMount}{'stop'}++;
+   }
+   else {
+      # Report any unmatched entries...
+      chomp($ThisLine);
+      $OtherList{$ThisLine}++;
+   }
+}
+
+if (keys %FailedStartup) {
+   print "\nFailed Startups:\n";
+   foreach $ThisOne (keys %FailedStartup) {
+      print "   $ThisOne       " . $FailedStartup{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %Failed) {
+   print "\nFailed mounts:\n";
+   foreach $ThisOne (sort keys %Failed) {
+      printf ("   %-20s", $ThisOne);
+      if ($Failed{$ThisOne}{'nfsm'}) {
+         print "NFS Mount Failure $Failed{$ThisOne}{'nfsm'} Time(s)"; }
+      if ($Failed{$ThisOne}{'nfsl'}) {
+         print "NFS Lookup Failure $Failed{$ThisOne}{'nfsl'} Time(s)"; }
+      if ($Failed{$ThisOne}{'mnt'}) {
+         print "Mount Failure $Failed{$ThisOne}{'mnt'} Time(s)"; }
+      if ($Failed{$ThisOne}{'file'}) {
+         print "File Lookup Failure $Failed{$ThisOne}{'file'} Time(s)"; }
+      if ($Failed{$ThisOne}{'program'}) {
+         print "Program Lookup Failure $Failed{$ThisOne}{'program'} Time(s)"; }
+      print "\n";
+   }
+}
+
+if ( ($Detail >= 10) and (keys %StartStop) ) {
+   print "\nStatistics:\n";
+   print "   Total number of mount attempts: $MountAttempts\n";
+   foreach $ThisOne (keys %StartStop) {
+      $StartStop{$ThisOne}{'start'} = 0 unless defined $StartStop{$ThisOne}{'start'};
+      $StartStop{$ThisOne}{'stop'} = 0 unless defined $StartStop{$ThisOne}{'stop'};
+      print "   $ThisOne: Started $StartStop{$ThisOne}{'start'} and stopped $StartStop{$ThisOne}{'stop'} Time(s)\n";
+   }
+}
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $ThisOne (keys %OtherList) {
+      print "$ThisOne: $OtherList{$ThisOne} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

@@ -1,0 +1,1573 @@
+##########################################################################
+# $Id: qmail-smtpd,v 1.10 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: qmail-smtpd,v $
+# Revision 1.10  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.9  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.8  2007/06/18 03:58:37  bjorn
+# Changed to handle any mail port, by Bob Hutchinson.
+#
+# Revision 1.7  2007/01/29 19:09:51  bjorn
+# Handle log entries from simscan v1.2 or later, and improved output report,
+# by Bob Hutchinson.
+#
+# Revision 1.6  2005/12/17 15:45:42  bjorn
+# Fixed error in rblsmtpd lines, by Bob Hutchinson
+#
+# Revision 1.5  2005/10/19 05:31:29  bjorn
+# Fixes to report headings, by Bob Hutchinson
+#
+# Revision 1.4  2005/10/06 23:37:46  mike
+# Added #vi tag -mgt
+#
+# Revision 1.3  2005/09/27 21:20:28  bjorn
+# Quarantine support, by Bob Hutchinson
+#
+# Revision 1.2  2005/09/07 15:20:21  bjorn
+# Added badmailfrom/badmailto, by Bob Hutchinson
+#
+# Revision 1.1  2005/09/07 00:37:59  bjorn
+# New qmail multilog files written by Bob Hutchinson
+#
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Bob Hutchinson
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'};
+$QmailDetail = $ENV{'qmail_high_detail'};
+$QmailThreshold = ($ENV{'threshold'} ? $ENV{'threshold'} : 0 );
+$ToThreshold = $ENV{'to_threshold'};
+$FromThreshold = $ENV{'from_threshold'};
+$BlockedThreshold = $ENV{'blocked_threshold'};
+# simscan
+$SimscanThreshold = $ENV{'simscan_threshold'};
+$SimscanFromThreshold = $ENV{'simscan_from_threshold'};
+$SimscanToThreshold = $ENV{'simscan_to_threshold'};
+$SimscanAttachThreshold = $ENV{'simscan_attach_threshold'};
+$SimscanRegexThreshold = $ENV{'simscan_regex_threshold'};
+
+$ShowSimscanPassthru = $ENV{'show_simscan_passthru'};
+$SimscanPassthruIpFromThreshold = $ENV{'simscan_passthru_ip_from_threshold'};
+$SimscanPassthruFromThreshold = $ENV{'simscan_passthru_from_threshold'};
+$SimscanPassthruToThreshold = $ENV{'simscan_passthru_to_threshold'};
+
+$ShowSimscanSpamReject = $ENV{'show_simscan_spam_reject'};
+$SimscanSpamRejectIpFromThreshold = $ENV{'simscan_spam_reject_ip_from_threshold'};
+$SimscanSpamRejectFromThreshold = $ENV{'simscan_spam_reject_from_threshold'};
+$SimscanSpamRejectToThreshold = $ENV{'simscan_spam_reject_to_threshold'};
+
+$ShowSimscanSpamDropped = $ENV{'show_simscan_spam_dropped'};
+$SimscanSpamDroppedIpFromThreshold = $ENV{'simscan_spam_dropped_ip_from_threshold'};
+$SimscanSpamDroppedFromThreshold = $ENV{'simscan_spam_dropped_from_threshold'};
+$SimscanSpamDroppedToThreshold = $ENV{'simscan_spam_dropped_to_threshold'};
+
+# chkuser
+$ShowChkuserRejects = $ENV{'show_chkuser_rejects'};
+$ChkuserRejectsFromThreshold = $ENV{'chkuser_rejects_from_threshold'};
+$ChkuserRejectsToThreshold = $ENV{'chkuser_rejects_to_threshold'};
+$ChkuserRejectsRemoteThreshold = $ENV{'chkuser_rejects_remote_threshold'};
+$ChkuserRejectsReasonThreshold = $ENV{'chkuser_rejects_reason_threshold'};
+
+$ShowChkuserRejectsRelay = $ENV{'show_chkuser_rejects_relay'};
+$ChkuserRejectsRelayFromThreshold = $ENV{'chkuser_rejects_relay_from_threshold'};
+$ChkuserRejectsRelayToThreshold = $ENV{'chkuser_rejects_relay_to_threshold'};
+$ChkuserRejectsRelayRemoteThreshold = $ENV{'chkuser_rejects_relay_remote_threshold'};
+
+$ShowChkuserAccepts = $ENV{'show_chkuser_accepts'};
+$ChkuserAcceptsFromThreshold = $ENV{'chkuser_accepts_from_threshold'};
+$ChkuserAcceptsToThreshold = $ENV{'chkuser_accepts_to_threshold'};
+
+$ShowChkuserAcceptsRelay = $ENV{'show_chkuser_accepts_relay'};
+$ChkuserAcceptsRelayFromThreshold = $ENV{'chkuser_accepts_relay_from_threshold'};
+$ChkuserAcceptsRelayToThreshold = $ENV{'chkuser_accepts_relay_to_threshold'};
+
+$ShowChkuserOther = $ENV{'show_chkuser_other'};
+$ChkuserNoAuthResourceThreshold = $ENV{'chkuser_noauthresource_threshold'};
+$ChkuserOverquotaThreshold = $ENV{'chkuser_overquota_threshold'};
+$ChkuserRejectedIntrusionThreshold = $ENV{'chkuser_rejected_intrusion_threshold'};
+
+$ShowChkuserAcceptedSender = $ENV{'show_chkuser_accepted_sender'};
+$ChkuserAcceptedSenderFromThreshold = $ENV{'chkuser_accepted_sender_from_threshold'};
+$ChkuserAcceptedSenderRemoteThreshold = $ENV{'chkuser_accepted_sender_remote_threshold'};
+$ChkuserAcceptedNullSenderFromThreshold = $ENV{'chkuser_accepted_null_sender_from_threshold'};
+
+$ShowChkuserRejectedSender = $ENV{'show_chkuser_rejected_sender'};
+$ChkuserRejectedSenderFromThreshold = $ENV{'chkuser_rejected_sender_from_threshold'};
+$ChkuserRejectedSenderRemoteThreshold = $ENV{'chkuser_rejected_sender_remote_threshold'};
+$ChkuserRejectedSenderReasonThreshold = $ENV{'chkuser_rejected_sender_reason_threshold'};
+
+$BadMailToIpThreshold = $ENV{'badmailto_ip_threshold'};
+$BadMailToEmailThreshold = $ENV{'badmailto_email_threshold'};
+$BadMailFromIpThreshold = $ENV{'badmailfrom_ip_threshold'};
+$BadMailFromEmailThreshold = $ENV{'badmailfrom_email_threshold'};
+
+$IgnoreUnmatched = $ENV{'ignoreunmatched'};
+
+while (defined($ThisLine = <STDIN>)) {
+	if ( ( $ThisLine =~ /status: / )
+		or ( $ThisLine =~ /end (\d+) status \d+/ )
+		or ( $ThisLine =~ /simscan: Putting the message in quarantine/ )
+		) {
+		# We don't care about these
+	}
+	elsif ( ($pid1, $RemoteServer) = ( $ThisLine =~ /pid (\d+) from (.*)/ ) ) {
+		$From{$RemoteServer}++;
+		$TotalFrom++;
+		$GrandTotalFrom++;
+	}
+	elsif ( ($pid2,$LocalServer,$rest) = ( $ThisLine =~ /ok (\d+) \d+:(.*):\d+\s+(.*)/ ) ) {
+		$To{$LocalServer}++;
+		$TotalTo++;
+		$Total++;
+		if ( $rest !~ /^\:/) {
+			# we have a domain
+			($d, $ip ) = ($rest =~ /^(.*):(.*)::\d+$/);
+			$Domains{$ip} = $d;
+		}
+	}
+	elsif ( ($Warning) = ( $ThisLine =~ /warning: (.*)/i ) ) {
+		$Warnings{$Warning}++;
+	}
+	# rblsmtpd
+	elsif ( ($Blocked, $rbl) = ( $ThisLine =~ /rblsmtpd: (.*) pid \d+: 451 (.*)$/ ) ) {
+		$Blockeds{$Blocked}++;
+		$TotalBlocked++;
+		$Rbl{$Blocked} = $rbl;
+		# remove it from previous parse
+		if ( defined( $From{$Blocked} ) ) {
+			$From{$Blocked}--;
+			$TotalFrom--;
+		}
+	}
+	# CHKUSER rejected rcpt
+	elsif (($from,$remotedomain, $remote, $to, $reason) = ( $ThisLine =~ /CHKUSER rejected rcpt: from <(.*):.*:> remote <(.*):.*:(.*)> rcpt <(.*)> : (.*)/ )) {
+		$ChkuserRejectsFrom{$from}++;
+		$ChkuserRejectsRemote{$remote}++;
+		$Domains{$remote} = $remotedomain if($remotedomain);
+		$ChkuserRejectsTo{$to}++;
+		$ChkuserRejectsReason{$reason}++;
+
+		$TotalReject++;
+		# remove it from previous parse
+		if ( defined( $From{$from} ) ) {
+			$From{$from}--;
+			$TotalFrom--;
+		}
+	}
+	# CHKUSER rejected relaying
+	elsif (($from, $remotedomain, $remotedomain2, $remote, $to, $reason) = ( $ThisLine =~ /CHKUSER rejected relaying: from <(.*):.*:> remote <(.*):(.*):(.*)> rcpt <(.*)> : (.*)/ )) {
+		$ChkuserRejectsRelayFrom{$from}++;
+		$ChkuserRejectsRelayTo{$to}++;
+		$ChkuserRejectsRelayRemote{$remote}++;
+		if (! $Domains{$remote} ) {
+			if ( $remotedomain2 && $remotedomain2 != 'unknown' ) {
+				$Domains{$remote} = $remotedomain2;
+			}
+			elsif ( $remotedomain ) {
+				$Domains{$remote} = $remotedomain;
+			}
+		}
+
+		$ChkuserRejectsReason{$reason}++;
+
+		$TotalRejectRelay++;
+		# remove it from previous parse
+		if ( defined( $From{$from} ) ) {
+			$From{$from}--;
+			$TotalFrom--;
+		}
+	}
+	# CHKUSER accepted rcpt
+	elsif (($from, $to) = ( $ThisLine =~ /CHKUSER accepted rcpt: from <(.*):.*:> .* rcpt <(.*)> : found existing recipient/ )) {
+		$ChkuserAcceptsFrom{$from}++;
+		$ChkuserAcceptsTo{$to}++;
+		$TotalAccept++;
+	}
+	# CHKUSER relaying rcpt
+	elsif (($from, $to) = ( $ThisLine =~ /CHKUSER relaying rcpt: from <(.*):.*:> .* rcpt <(.*)> : client allowed to relay/ )) {
+		$ChkuserAcceptsRelayFrom{$from}++;
+		$ChkuserAcceptsRelayTo{$to}++;
+		$TotalAcceptRelay++;
+	}
+	# CHKUSER no auth resource
+	elsif (($from, $to) = ( $ThisLine =~ /CHKUSER no auth resource: from <(.*):.*:> .* rcpt <(.*)> :/ )) {
+		$ChkuserNoAuthResourceFrom{$from}++;
+		$ChkuserNoAuthResourceTo{$to}++;
+		$TotalNoAuthResource++;
+		# remove it from previous parse
+		if ( defined( $From{$from} ) ) {
+			$From{$from}--;
+			$TotalFrom--;
+		}
+	}
+	# CHKUSER mbx overquota
+	elsif (($from, $to) = ( $ThisLine =~ /CHKUSER mbx overquota: from <(.*):.*:> .* rcpt <(.*)> :/ )) {
+		$ChkuserOverquotaTo{$to}++;
+		$TotalOverquota++;
+		# remove it from previous parse
+		if ( defined( $From{$from} ) ) {
+			$From{$from}--;
+			$TotalFrom--;
+		}
+	}
+	# CHKUSER rejected intrusion
+	elsif (($from, $to) = ( $ThisLine =~ /CHKUSER rejected intrusion: from <(.*):.*:> .* rcpt <(.*)> :/ )) {
+		$ChkuserRejectedIntrusionFrom{$from}++;
+		$ChkuserRejectedIntrusionTo{$to}++;
+		$TotalRejectedIntrusion++;
+		# remove it from previous parse
+		if ( defined( $From{$from} ) ) {
+			$From{$from}--;
+			$TotalFrom--;
+		}
+	}
+	# CHKUSER accepted sender
+	elsif (($from, $remote) = ( $ThisLine =~ /CHKUSER accepted sender: from <(.*):.*:> remote <.*:.*:(.*)> rcpt <>/ )) {
+		$ChkuserAcceptedSenderFrom{$from}++;
+		$ChkuserAcceptedSenderRemote{$remote}++;
+	}
+	# CHKUSER accepted null sender
+	elsif (($remote) = ( $ThisLine =~ /CHKUSER accepted null sender: from <:.*:> remote <.*:.*:(.*)> rcpt <> : accepted null sender always/ )) {
+		$ChkuserAcceptedNullSenderRemote{$remote}++;
+	}
+
+	# CHKUSER rejected sender
+	elsif (($from, $remotedomain, $remotedomain2, $remote, $reason) = ( $ThisLine =~ /CHKUSER rejected sender: from <(.*):.*:> remote <(.*):(.*):(.*)> rcpt <> : (.*)/ )) {
+		$ChkuserRejectedSenderFrom{$from}++;
+		$ChkuserRejectedSenderRemote{$remote}++;
+		if (! $Domains{$remote} ) {
+			if ( $remotedomain2 && $remotedomain2 != 'unknown' ) {
+				$Domains{$remote} = $remotedomain2;
+			}
+			elsif ( $remotedomain ) {
+				$Domains{$remote} = $remotedomain;
+			}
+		}
+		$ChkuserRejectedSenderReason{$reason}++;
+	}
+
+	# simscan-1.1 virus
+	elsif ( ($virus, $virusfrom, $virusto, $scantime) = ($ThisLine =~ /simscan:.*virus: (.*) from: (.*) to: (.*) time: (.*)s/)) {
+		$Simscan{$virus}++;
+		$SimscanTotal++;
+		$SimscanVirusTotal++;
+		$SimscanFrom{$virusfrom}++;
+		$SimscanTo{$virusto}++;
+		if ($Maxscantimevirus < $scantime) {
+			$Maxscantimevirus = $scantime;
+		}
+		$Totalscantimevirus += $scantime;
+	}
+
+	# simscan-1.2 virus
+	elsif (
+		(($scantime, $virus, $virusfrom, $virusto ) = ($ThisLine =~ /simscan:\[\d+\]:VIRUS:(.*)s:(.*):.*:(.*):(.*)/)) ||
+		(($scantime, $virus, $virusfrom, $virusto ) = ($ThisLine =~ /simscan:\[\d+\]:VIRUS DROPPED:(.*)s:(.*):.*:(.*):(.*)/))
+		) {
+		$Simscan{$virus}++;
+		$SimscanTotal++;
+		$SimscanVirusTotal++;
+		$SimscanFrom{$virusfrom}++;
+		$SimscanTo{$virusto}++;
+		if ($Maxscantimevirus < $scantime) {
+			$Maxscantimevirus = $scantime;
+		}
+		$Totalscantimevirus += $scantime;
+	}
+
+	# simscan attach
+	elsif ( ($attach, $attachfrom, $attachto, $scantime) = ($ThisLine =~ /simscan:.*invalid attachment: (.*) from: (.*) to: (.*) time: (.*)s/) ) {
+		$SimscanTotal++;
+		$SimscanAttach{$attach}++;
+		$SimscanAttachFrom{$attachfrom}++;
+		$SimscanAttachTo{$attachto}++;
+		$SimscanAttachTotal++;
+		if ($Maxscantimeattach < $scantime) {
+			$Maxscantimeattach = $scantime;
+		}
+		$Totalscantimeattach += $scantime;
+	}
+
+	# simscan-1.2 attach
+	elsif ( ($scantime, $attach, $attachfrom, $attachto ) = ($ThisLine =~ /simscan:\[\d+\]:ATTACH:(.*)s:(.*):.*:(.*):(.*)/)) {
+		$SimscanTotal++;
+		$SimscanAttach{$attach}++;
+		$SimscanAttachFrom{$attachfrom}++;
+		$SimscanAttachTo{$attachto}++;
+		$SimscanAttachTotal++;
+		if ($Maxscantimeattach < $scantime) {
+			$Maxscantimeattach = $scantime;
+		}
+		$Totalscantimeattach += $scantime;
+	}
+
+	# simscan-1.2 regex
+	elsif ( ($scantime, $regex, $regexfrom, $regexto ) = ($ThisLine =~ /simscan:\[\d+\]:REGEX:(.*)s:(.*):.*:(.*):(.*)/)) {
+		$SimscanTotal++;
+		$SimscanRegex{$regex}++;
+		$SimscanRegexFrom{$regexfrom}++;
+		$SimscanRegexTo{$regexto}++;
+		$SimscanRegexTotal++;
+		if ($Maxscantimeregex < $scantime) {
+			$Maxscantimeregex = $scantime;
+		}
+		$Totalscantimeregex += $scantime;
+	}
+
+	# simscan-1.2 passthru
+	elsif ( ($passthrulimits, $scantime, $passthruipfrom, $passthrufrom, $passthruto ) = ($ThisLine =~ /simscan:\[\d+\]:PASSTHRU \((.*)\):(.*)s:.*:(.*):(.*):(.*)/)) {
+		$SimscanTotal++;
+		($ptl1,$ptl2) = split(/\//, $passthrulimits);
+		if( $ptl1 >= $ptl2 ) {
+			$SimscanPassthruIpFrom{$passthruipfrom}++;
+			$SimscanPassthruFrom{$passthrufrom}++;
+			$SimscanPassthruTo{$passthruto}++;
+			$SimscanPassthruTotal++;
+		}
+		if ($Maxscantimespam < $scantime) {
+			$Maxscantimespam = $scantime;
+		}
+		$Totalscantimespam += $scantime;
+	}
+
+	# simscan-1.2 spam reject
+	elsif ( ( $scantime, $spamrejectipfrom, $spamrejectfrom, $spamrejectto ) = ($ThisLine =~ /simscan:\[\d+\]:SPAM REJECT \(.*\):(.*)s:.*:(.*):(.*):(.*)/)) {
+		$SimscanTotal++;
+		$SimscanSpamrejectIpFrom{$spamrejectipfrom}++;
+		$SimscanSpamrejectFrom{$spamrejectfrom}++;
+		$SimscanSpamrejectTo{$spamrejectto}++;
+		$SimscanSpamrejectTotal++;
+		if ($Maxscantimespam < $scantime) {
+			$Maxscantimespam = $scantime;
+		}
+		$Totalscantimespam += $scantime;
+	}
+
+	# simscan-1.2 spam dropped
+	elsif ( ( $scantime, $spamdroppedipfrom, $spamdroppedfrom, $spamdroppedto ) = ($ThisLine =~ /simscan:\[\d+\]:SPAM DROPPED \(.*\):(.*)s:.*:(.*):(.*):(.*)/)) {
+		$SimscanTotal++;
+		$SimscanSpamdroppedIpFrom{$spamdroppedipfrom}++;
+		$SimscanSpamdroppedFrom{$spamdroppedfrom}++;
+		$SimscanSpamdroppedTo{$spamdroppedto}++;
+		$SimscanSpamdroppedTotal++;
+		if ($Maxscantimespam < $scantime) {
+			$Maxscantimespam = $scantime;
+		}
+		$Totalscantimespam += $scantime;
+	}
+
+	# simscan-1.2 clean
+	elsif ( ($scantime) = ($ThisLine =~ /simscan:\[\d+\]:CLEAN \(.*\):(.*)s:.*:.*:.*:.*/) ) {
+		if ($Maxscantimespam < $scantime) {
+			$Maxscantimespam = $scantime;
+		}
+		$Totalscantimespam += $scantime;
+		$SimscanCleanTotal++;
+	}
+
+	# simscan-1.2 relayclient
+	elsif ( ($scantime) = ($ThisLine =~ /simscan:\[\d+\]:RELAYCLIENT:(.*)s:.*:.*:.*:.*/) ) {
+		if ($Maxscantimespam < $scantime) {
+			$Maxscantimespam = $scantime;
+		}
+		$Totalscantimespam += $scantime;
+		$SimscanRelayClientTotal++;
+	}
+
+	# simscan quarantine
+	elsif ( $ThisLine =~ /simscan: Putting the message in quarantine/ ) {
+		$Quarantine++;
+	}
+
+	# badmailfrom
+	elsif ( ($email,$ip) = ($ThisLine =~ /qmail-smtpd: badmailfrom: (.*) at (.*)/) ) {
+		$Badmailfromemail{$email}++;
+		$Badmailfromip{$ip}++;
+		$Badmailfromtot++;
+	}
+
+	# badmailto
+	elsif ( ($email,$ip) = ($ThisLine =~ /qmail-smtpd: badmailto: (.*) at (.*)/) ) {
+		$Badmailtoemail{$email}++;
+		$Badmailtoip{$ip}++;
+		$Badmailtotot++;
+	}
+
+	else {
+		# Report any unmatched entries...
+		$ThisLine =~ s/^\s+//g;
+		$ThisLine =~ s/\s+$//g;
+		if ( ! $IgnoreUnmatched && $ThisLine != "" ) {
+			push @OtherList,$ThisLine;
+		}
+	}
+}
+
+if ($QmailDetail >= 1) {
+	if (($FromThreshold < 0) or ($FromThreshold eq '')) {
+		$FromThreshold = $QmailThreshold;
+	}
+	if (($ToThreshold < 0) or ($ToThreshold eq '')) {
+		$ToThreshold = $QmailThreshold;
+	}
+	if (($BlockedThreshold < 0) or ($BlockedThreshold eq '')) {
+		$BlockedThreshold = $QmailThreshold;
+	}
+	if (($SimscanThreshold < 0) or ($SimscanThreshold eq '')) {
+		$SimscanThreshold = $QmailThreshold;
+	}
+	if (($SimscanFromThreshold < 0) or ($SimscanFromThreshold eq '')) {
+		$SimscanFromThreshold = $QmailThreshold;
+	}
+	if (($SimscanToThreshold < 0) or ($SimscanToThreshold eq '')) {
+		$SimscanToThreshold = $QmailThreshold;
+	}
+	if (($SimscanAttachThreshold < 0) or ($SimscanAttachThreshold eq '')) {
+		$SimscanAttachThreshold = $QmailThreshold;
+	}
+	if (($SimscanRegexThreshold < 0) or ($SimscanRegexThreshold eq '')) {
+		$SimscanRegexThreshold = $QmailThreshold;
+	}
+	if (($SimscanPassthruIpFromThreshold < 0) or ($SimscanPassthruIpFromThreshold eq '')) {
+		$SimscanPassthruIpFromThreshold = $QmailThreshold;
+	}
+	if (($SimscanPassthruFromThreshold < 0) or ($SimscanPassthruFromThreshold eq '')) {
+		$SimscanPassthruFromThreshold = $QmailThreshold;
+	}
+	if (($SimscanPassthruToThreshold < 0) or ($SimscanPassthruToThreshold eq '')) {
+		$SimscanPassthruToThreshold = $QmailThreshold;
+	}
+	if (($SimscanSpamRejectIpFromThreshold < 0) or ($SimscanSpamRejectIpFromThreshold eq '')) {
+		$SimscanSpamRejectIpFromThreshold = $QmailThreshold;
+	}
+	if (($SimscanSpamRejectFromThreshold < 0) or ($SimscanSpamRejectFromThreshold eq '')) {
+		$SimscanSpamRejectFromThreshold = $QmailThreshold;
+	}
+	if (($SimscanSpamRejectToThreshold < 0) or ($SimscanSpamRejectToThreshold eq '')) {
+		$SimscanSpamRejectToThreshold = $QmailThreshold;
+	}
+	if (($SimscanSpamDroppedIpFromThreshold < 0) or ($SimscanSpamDroppedIpFromThreshold eq '')) {
+		$SimscanSpamDroppedIpFromThreshold = $QmailThreshold;
+	}
+	if (($SimscanSpamDroppedFromThreshold < 0) or ($SimscanSpamDroppedFromThreshold eq '')) {
+		$SimscanSpamDroppedFromThreshold = $QmailThreshold;
+	}
+	if (($SimscanSpamDroppedToThreshold < 0) or ($SimscanSpamDroppedToThreshold eq '')) {
+		$SimscanSpamDroppedToThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectsFromThreshold < 0) or ($ChkuserRejectsFromThreshold eq '')) {
+		$ChkuserRejectsFromThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectsToThreshold < 0) or ($ChkuserRejectsToThreshold eq '')) {
+		$ChkuserRejectsToThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectsRemoteThreshold < 0) or ($ChkuserRejectsRemoteThreshold eq '')) {
+		$ChkuserRejectsRemoteThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectsRelayFromThreshold < 0) or ($ChkuserRejectsRelayFromThreshold eq '')) {
+		$ChkuserRejectsRelayFromThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectsRelayToThreshold < 0) or ($ChkuserRejectsRelayToThreshold eq '')) {
+		$ChkuserRejectsRelayToThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectsRelayRemoteThreshold < 0) or ($ChkuserRejectsRelayRemoteThreshold eq '')) {
+		$ChkuserRejectsRelayRemoteThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectsReasonThreshold < 0) or ($ChkuserRejectsReasonThreshold eq '')) {
+		$ChkuserRejectsReasonThreshold = $QmailThreshold;
+	}
+	if (($ChkuserAcceptsFromThreshold < 0) or ($ChkuserAcceptsFromThreshold eq '')) {
+		$ChkuserAcceptsFromThreshold = $QmailThreshold;
+	}
+	if (($ChkuserAcceptsToThreshold < 0) or ($ChkuserAcceptsToThreshold eq '')) {
+		$ChkuserAcceptsToThreshold = $QmailThreshold;
+	}
+	if (($ChkuserAcceptsRelayFromThreshold < 0) or ($ChkuserAcceptsRelayFromThreshold eq '')) {
+		$ChkuserAcceptsRelayFromThreshold = $QmailThreshold;
+	}
+	if (($ChkuserAcceptsRelayToThreshold < 0) or ($ChkuserAcceptsRelayToThreshold eq '')) {
+		$ChkuserAcceptsRelayToThreshold = $QmailThreshold;
+	}
+	if (($ChkuserNoAuthResourceThreshold < 0) or ($ChkuserNoAuthResourceThreshold eq '')) {
+		$ChkuserNoAuthResourceThreshold = $QmailThreshold;
+	}
+	if (($ChkuserOverquotaThreshold < 0) or ($ChkuserOverquotaThreshold eq '')) {
+		$ChkuserOverquotaThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectedIntrusionThreshold <0) or ($ChkuserRejectedIntrusionThreshold eq '')) {
+		$ChkuserRejectedIntrusionThreshold = $QmailThreshold;
+	}
+	if (($ChkuserAcceptedSenderFromThreshold <0) or ($ChkuserAcceptedSenderFromThreshold eq '')) {
+		$ChkuserAcceptedSenderFromThreshold = $QmailThreshold;
+	}
+	if (($ChkuserAcceptedSenderRemoteThreshold <0) or ($ChkuserAcceptedSenderRemoteThreshold eq '')) {
+		$ChkuserAcceptedSenderRemoteThreshold = $QmailThreshold;
+	}
+	if (($ChkuserAcceptedNullSenderFromThreshold <0) or ($ChkuserAcceptedNullSenderFromThreshold eq '')) {
+		$ChkuserAcceptedNullSenderFromThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectedSenderFromThreshold <0) or ($ChkuserRejectedSenderFromThreshold eq '')) {
+		$ChkuserRejectedSenderFromThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectedSenderRemoteThreshold <0) or ($ChkuserRejectedSenderRemoteThreshold eq '')) {
+		$ChkuserRejectedSenderRemoteThreshold = $QmailThreshold;
+	}
+	if (($ChkuserRejectedSenderReasonThreshold <0) or ($ChkuserRejectedSenderReasonThreshold eq '')) {
+		$ChkuserRejectedSenderReasonThreshold = $QmailThreshold;
+	}
+	if (($BadMailToIpThreshold <0) or ($BadMailToIpThreshold eq '')) {
+		$BadMailToIpThreshold = $QmailThreshold;
+	}
+	if (($BadMailToEmailThreshold <0) or ($BadMailToEmailThreshold eq '')) {
+		$BadMailToEmailThreshold = $QmailThreshold;
+	}
+	if (($BadMailFromIpThreshold <0) or ($BadMailFromIpThreshold eq '')) {
+		$BadMailFromIpThreshold = $QmailThreshold;
+	}
+	if (($BadMailFromEmailThreshold <0) or ($BadMailFromEmailThreshold eq '')) {
+		$BadMailFromEmailThreshold = $QmailThreshold;
+	}
+
+	# start output
+	if ( (keys %From) ) {
+		print "\nConnections from (Threshold of " . $FromThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$From{$b} <=> $From{$a}} keys %From) {
+			if ($From{$Line} >= $FromThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $From{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $From{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	if ( (keys %To) ) {
+		print "\nConnections to (Threshold of " . $ToThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$To{$b} <=> $To{$a}} keys %To) {
+			if ($To{$Line} >= $ToThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $To{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $To{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	if ( (keys %Blockeds) ) {
+		print "\nBlocked (Threshold of " . $BlockedThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$Blockeds{$b} <=> $Blockeds{$a}} keys %Blockeds) {
+			if ($Blockeds{$Line} >= $BlockedThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $Blockeds{$Line} . " Time(s)" . ($Rbl{$Line} ? " By ".$Rbl{$Line} : "") . "\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $Blockeds{$Line} . " Time(s)" . ($Rbl{$Line} ? " By ".$Rbl{$Line} : "") . "\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# chkuser
+	if ( $ShowChkuserRejects ) {
+		if ( (keys %ChkuserRejectsFrom) ) {
+			print "\nChkuser Rejects From (Threshold of " . $ChkuserRejectsFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectsFrom{$b} <=> $ChkuserRejectsFrom{$a}} keys %ChkuserRejectsFrom) {
+				if ($ChkuserRejectsFrom{$Line} >= $ChkuserRejectsFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectsFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectsFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserRejectsTo) ) {
+			print "\nChkuser Rejects To (Threshold of " . $ChkuserRejectsToThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectsTo{$b} <=> $ChkuserRejectsTo{$a}} keys %ChkuserRejectsTo) {
+				if ($ChkuserRejectsTo{$Line} >= $ChkuserRejectsToThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectsTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectsTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserRejectsRemote) ) {
+			print "\nChkuser Rejects Remote (Threshold of " . $ChkuserRejectsRemoteThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectsRemote{$b} <=> $ChkuserRejectsRemote{$a}} keys %ChkuserRejectsRemote) {
+				if ($ChkuserRejectsRemote{$Line} >= $ChkuserRejectsRemoteThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectsRemote{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectsRemote{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	if ( $ShowChkuserRejectsRelay ) {
+		if ( (keys %ChkuserRejectsRelayFrom) ) {
+			print "\nChkuser Rejects Relay From (Threshold of " . $ChkuserRejectsRelayFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectsRelayFrom{$b} <=> $ChkuserRejectsRelayFrom{$a}} keys %ChkuserRejectsRelayFrom) {
+				if ($ChkuserRejectsRelayFrom{$Line} >= $ChkuserRejectsRelayFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectsRelayFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectsRelayFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserRejectsRelayTo) ) {
+			print "\nChkuser Rejects Relay To (Threshold of " . $ChkuserRejectsRelayToThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectsRelayTo{$b} <=> $ChkuserRejectsRelayTo{$a}} keys %ChkuserRejectsRelayTo) {
+				if ($ChkuserRejectsRelayTo{$Line} >= $ChkuserRejectsRelayToThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectsRelayTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectsRelayTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserRejectsRelayRemote) ) {
+			print "\nChkuser Rejects Relay Remote (Threshold of " . $ChkuserRejectsRelayRemoteThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectsRelayRemote{$b} <=> $ChkuserRejectsRelayRemote{$a}} keys %ChkuserRejectsRelayRemote) {
+				if ($ChkuserRejectsRelayRemote{$Line} >= $ChkuserRejectsRelayRemoteThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectsRelayRemote{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectsRelayRemote{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+	}
+
+	if ( $ShowChkuserRejects ) {
+		if ( (keys %ChkuserRejectsReason) ) {
+			print "\nChkuser Rejects Reason (Threshold of " . $ChkuserRejectsReasonThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectsReason{$b} <=> $ChkuserRejectsReason{$a}} keys %ChkuserRejectsReason) {
+				if ($ChkuserRejectsReason{$Line} >= $ChkuserRejectsReasonThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectsReason{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectsReason{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	if ( $ShowChkuserAccepts ) {
+		if ( (keys %ChkuserAcceptsFrom) ) {
+			print "\nChkuser Accepts from (Threshold of " . $ChkuserAcceptsFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserAcceptsFrom{$b} <=> $ChkuserAcceptsFrom{$a}} keys %ChkuserAcceptsFrom) {
+				if ($ChkuserAcceptsFrom{$Line} >= $ChkuserAcceptsFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserAcceptsFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserAcceptsFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserAcceptsTo) ) {
+			print "\nChkuser Accepts to (Threshold of " . $ChkuserAcceptsToThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserAcceptsTo{$b} <=> $ChkuserAcceptsTo{$a}} keys %ChkuserAcceptsTo) {
+				if ($ChkuserAcceptsTo{$Line} >= $ChkuserAcceptsToThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserAcceptsTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserAcceptsTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	if ( $ShowChkuserAcceptsRelay ) {
+		if ( (keys %ChkuserAcceptsRelayFrom) ) {
+			print "\nChkuser Accepts Relay from (Threshold of " . $ChkuserAcceptsRelayFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserAcceptsRelayFrom{$b} <=> $ChkuserAcceptsRelayFrom{$a}} keys %ChkuserAcceptsRelayFrom) {
+				if ($ChkuserAcceptsRelayFrom{$Line} >= $ChkuserAcceptsRelayFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserAcceptsRelayFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserAcceptsRelayFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserAcceptsRelayTo) ) {
+			print "\nChkuser Accepts Relay to (Threshold of " . $ChkuserAcceptsRelayToThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserAcceptsRelayTo{$b} <=> $ChkuserAcceptsRelayTo{$a}} keys %ChkuserAcceptsRelayTo) {
+				if ($ChkuserAcceptsRelayTo{$Line} >= $ChkuserAcceptsRelayToThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserAcceptsRelayTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserAcceptsRelayTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	if ( $ShowChkuserOther ) {
+		if ( (keys %ChkuserNoAuthResourceFrom) ) {
+			print "\nChkuser No Auth Resource from (Threshold of " . $ChkuserNoAuthResourceThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserNoAuthResourceFrom{$b} <=> $ChkuserNoAuthResourceFrom{$a}} keys %ChkuserNoAuthResourceFrom) {
+				if ($ChkuserNoAuthResourceFrom{$Line} >= $ChkuserNoAuthResourceThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserNoAuthResourceFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserNoAuthResourceFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserNoAuthResourceTo) ) {
+			print "\nChkuser No Auth resource to (Threshold of " . $ChkuserNoAuthResourceThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserNoAuthResourceTo{$b} <=> $ChkuserNoAuthResourceTo{$a}} keys %ChkuserNoAuthResourceTo) {
+				if ($ChkuserNoAuthResourceTo{$Line} >= $ChkuserNoAuthResourceThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserNoAuthResourceTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserNoAuthResourceTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserOverquotaTo) ) {
+			print "\nChkuser Over Quota (Threshold of " . $ChkuserOverquotaThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserOverquotaTo{$b} <=> $ChkuserOverquotaTo{$a}} keys %ChkuserOverquotaTo) {
+				if ($ChkuserOverquotaTo{$Line} >= $ChkuserOverquotaThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserOverquotaTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserOverquotaTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserRejectedIntrusionFrom) ) {
+			print "\nChkuser Rejected Intrusions from (Threshold of " . $ChkuserRejectedIntrusionThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectedIntrusionFrom{$b} <=> $ChkuserRejectedIntrusionFrom{$a}} keys %ChkuserRejectedIntrusionFrom) {
+				if ($ChkuserRejectedIntrusionFrom{$Line} >= $ChkuserRejectedIntrusionThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectedIntrusionFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectedIntrusionFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserRejectedIntrusionTo) ) {
+			print "\nChkuser Rejected Intrusions to (Threshold of " . $ChkuserRejectedIntrusionThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectedIntrusionTo{$b} <=> $ChkuserRejectedIntrusionTo{$a}} keys %ChkuserRejectedIntrusionTo) {
+				if ($ChkuserRejectedIntrusionTo{$Line} >= $ChkuserRejectedIntrusionThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectedIntrusionTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectedIntrusionTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	if ( $ShowChkuserAcceptedSender ) {
+		if ( (keys %ChkuserAcceptedSenderFrom) ) {
+			print "\nChkuser accepted senders from (Threshold of " . $ChkuserAcceptedSenderFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserAcceptedSenderFrom{$b} <=> $ChkuserAcceptedSenderFrom{$a}} keys %ChkuserAcceptedSenderFrom) {
+				if ($ChkuserAcceptedSenderFrom{$Line} >= $ChkuserAcceptedSenderFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserAcceptedSenderFrom{$Line} . " Time(s)\n";
+					}
+					else {
+					print "\t" . $Line . " - ". $ChkuserAcceptedSenderFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+		if ( (keys %ChkuserAcceptedSenderRemote) ) {
+			print "\nChkuser accepted senders remote (Threshold of " . $ChkuserAcceptedSenderRemoteThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserAcceptedSenderRemote{$b} <=> $ChkuserAcceptedSenderRemote{$a}} keys %ChkuserAcceptedSenderRemote) {
+				if ($ChkuserAcceptedSenderRemote{$Line} >= $ChkuserAcceptedSenderRemoteThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserAcceptedSenderRemote{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserAcceptedSenderRemote{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+		if ( (keys %ChkuserAcceptedNullSenderFrom) ) {
+			print "\nChkuser accepted null senders from (Threshold of " . $ChkuserAcceptedNullSenderFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserAcceptedNullSenderFrom{$b} <=> $ChkuserAcceptedNullSenderFrom{$a}} keys %ChkuserAcceptedNullSenderFrom) {
+				if ($ChkuserAcceptedNullSenderFrom{$Line} >= $ChkuserAcceptedNullSenderFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserAcceptedNullSenderFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserAcceptedNullSenderFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	if ( $ShowChkuserRejectedSender ) {
+		if ( (keys %ChkuserRejectedSenderFrom) ) {
+			print "\nChkuser rejected senders from (Threshold of " . $ChkuserRejectedSenderFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectedSenderFrom{$b} <=> $ChkuserRejectedSenderFrom{$a}} keys %ChkuserRejectedSenderFrom) {
+				if ($ChkuserRejectedSenderFrom{$Line} >= $ChkuserRejectedSenderFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectedSenderFrom{$Line} . " Time(s)\n";
+					}
+					else {
+					print "\t" . $Line . " - ". $ChkuserRejectedSenderFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+		if ( (keys %ChkuserRejectedSenderRemote) ) {
+			print "\nChkuser rejected senders remote (Threshold of " . $ChkuserRejectedSenderRemoteThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectedSenderRemote{$b} <=> $ChkuserRejectedSenderRemote{$a}} keys %ChkuserRejectedSenderRemote) {
+				if ($ChkuserRejectedSenderRemote{$Line} >= $ChkuserRejectedSenderRemoteThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectedSenderRemote{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectedSenderRemote{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		if ( (keys %ChkuserRejectedSenderReason) ) {
+			print "\nChkuser rejected senders reason (Threshold of " . $ChkuserRejectedSenderReasonThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$ChkuserRejectedSenderReason{$b} <=> $ChkuserRejectedSenderReason{$a}} keys %ChkuserRejectedSenderReason) {
+				if ($ChkuserRejectedSenderReason{$Line} >= $ChkuserRejectedSenderReasonThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $ChkuserRejectedSenderReason{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $ChkuserRejectedSenderReason{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	# simscan
+	if ( (keys %Simscan) ) {
+		print "\nSimscan Viruses (Threshold of " . $SimscanThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$Simscan{$b} <=> $Simscan{$a}} keys %Simscan) {
+			if ($Simscan{$Line} >= $SimscanThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $Simscan{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $Simscan{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# simscan from
+	if ( (keys %SimscanFrom) ) {
+		print "\nSimscan Viruses From (Threshold of " . $SimscanFromThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$SimscanFrom{$b} <=> $SimscanFrom{$a}} keys %SimscanFrom) {
+			if ($SimscanFrom{$Line} >= $SimscanFromThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanFrom{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $SimscanFrom{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# simscan to
+	if ( (keys %SimscanTo) ) {
+		print "\nSimscan Viruses To (Threshold of " . $SimscanToThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$SimscanTo{$b} <=> $SimscanTo{$a}} keys %SimscanTo) {
+			if ($SimscanTo{$Line} >= $SimscanToThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanTo{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $SimscanTo{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# simscan attach
+	if ( (keys %SimscanAttach) ) {
+		print "\nSimscan Attachments (Threshold of " . $SimscanAttachThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$SimscanAttach{$b} <=> $SimscanAttach{$a}} keys %SimscanAttach) {
+			if ($SimscanAttach{$Line} >= $SimscanAttachThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanAttach{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $SimscanAttach{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# simscan attach from
+	if ( (keys %SimscanAttachFrom) ) {
+		print "\nSimscan Attachments From (Threshold of " . $SimscanAttachThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$SimscanAttachFrom{$b} <=> $SimscanAttachFrom{$a}} keys %SimscanAttachFrom) {
+			if ($SimscanAttachFrom{$Line} >= $SimscanAttachThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanAttachFrom{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $SimscanAttachFrom{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# simscan attach to
+	if ( (keys %SimscanAttachTo) ) {
+		print "\nSimscan Attachments To (Threshold of " . $SimscanAttachThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$SimscanAttachTo{$b} <=> $SimscanAttachTo{$a}} keys %SimscanAttachTo) {
+			if ($SimscanAttachTo{$Line} >= $SimscanAttachThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanAttachTo{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $SimscanAttachTo{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# simscan regex
+	if ( (keys %SimscanRegex) ) {
+		print "\nSimscan Regex (Threshold of " . $SimscanRegexThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$SimscanRegex{$b} <=> $SimscanRegex{$a}} keys %SimscanRegex) {
+			if ($SimscanRegex{$Line} >= $SimscanRegexThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanRegex{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $SimscanRegex{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# simscan regex from
+	if ( (keys %SimscanRegexFrom) ) {
+		print "\nSimscan Regex From (Threshold of " . $SimscanRegexThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$SimscanRegexFrom{$b} <=> $SimscanRegexFrom{$a}} keys %SimscanRegexFrom) {
+			if ($SimscanRegexFrom{$Line} >= $SimscanRegexThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanRegexFrom{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $SimscanRegexFrom{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	# simscan regex to
+	if ( (keys %SimscanRegexTo) ) {
+		print "\nSimscan Regex To (Threshold of " . $SimscanRegexThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$SimscanRegexTo{$b} <=> $SimscanRegexTo{$a}} keys %SimscanRegexTo) {
+			if ($SimscanRegexTo{$Line} >= $SimscanRegexThreshold) {
+				$threshold_reached=1;
+				if ($Domains{$Line}) {
+					print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanRegexTo{$Line} . " Time(s)\n";
+				}
+				else {
+					print "\t" . $Line . " - ". $SimscanRegexTo{$Line} . " Time(s)\n";
+				}
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+	if($ShowSimscanPassthru) {
+		# simscan passthru ip from
+		if ( (keys %SimscanPassthruIpFrom) ) {
+			print "\nSimscan Passthru Ip From (Threshold of " . $SimscanPassthruIpFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanPassthruIpFrom{$b} <=> $SimscanPassthruIpFrom{$a}} keys %SimscanPassthruIpFrom) {
+				if ($SimscanPassthruIpFrom{$Line} >= $SimscanPassthruIpFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanPassthruIpFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanPassthruIpFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		# simscan passthru from
+		if ( (keys %SimscanPassthruFrom) ) {
+			print "\nSimscan Passthru From (Threshold of " . $SimscanPassthruFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanPassthruFrom{$b} <=> $SimscanPassthruFrom{$a}} keys %SimscanPassthruFrom) {
+				if ($SimscanPassthruFrom{$Line} >= $SimscanPassthruFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanPassthruFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanPassthruFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		# simscan passthru to
+		if ( (keys %SimscanPassthruTo) ) {
+			print "\nSimscan Passthru To (Threshold of " . $SimscanPassthruToThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanPassthruTo{$b} <=> $SimscanPassthruTo{$a}} keys %SimscanPassthruTo) {
+				if ($SimscanPassthruTo{$Line} >= $SimscanPassthruToThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanPassthruTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanPassthruTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+	if ($ShowSimscanSpamReject) {
+		# simscan spamreject ip from
+		if ( (keys %SimscanSpamrejectIpFrom) ) {
+			print "\nSimscan Spam reject Ip From (Threshold of " . $SimscanSpamRejectIpFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanSpamrejectIpFrom{$b} <=> $SimscanSpamrejectIpFrom{$a}} keys %SimscanSpamrejectIpFrom) {
+				if ($SimscanSpamrejectIpFrom{$Line} >= $SimscanSpamRejectIpFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanSpamrejectIpFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanSpamrejectIpFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		# simscan spamreject from
+		if ( (keys %SimscanSpamrejectFrom) ) {
+			print "\nSimscan Spam reject From (Threshold of " . $SimscanSpamRejectFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanSpamrejectFrom{$b} <=> $SimscanSpamrejectFrom{$a}} keys %SimscanSpamrejectFrom) {
+				if ($SimscanSpamrejectFrom{$Line} >= $SimscanSpamRejectFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanSpamrejectFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanSpamrejectFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		# simscan spamreject to
+		if ( (keys %SimscanSpamrejectTo) ) {
+			print "\nSimscan Spam reject To (Threshold of " . $SimscanSpamRejectToThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanSpamrejectTo{$b} <=> $SimscanSpamrejectTo{$a}} keys %SimscanSpamrejectTo) {
+				if ($SimscanSpamrejectTo{$Line} >= $SimscanSpamRejectToThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanSpamrejectTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanSpamrejectTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	if ($ShowSimscanSpamDropped) {
+		# simscan spamdropped ip from
+		if ( (keys %SimscanSpamdroppedIpFrom) ) {
+			print "\nSimscan Spam dropped Ip From (Threshold of " . $SimscanSpamDroppedIpFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanSpamdroppedIpFrom{$b} <=> $SimscanSpamdroppedIpFrom{$a}} keys %SimscanSpamdroppedIpFrom) {
+				if ($SimscanSpamdroppedIpFrom{$Line} >= $SimscanSpamDroppedIpFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanSpamdroppedIpFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanSpamdroppedIpFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		# simscan spam dropped from
+		if ( (keys %SimscanSpamdroppedFrom) ) {
+			print "\nSimscan Spam dropped From (Threshold of " . $SimscanSpamDroppedFromThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanSpamdroppedFrom{$b} <=> $SimscanSpamdroppedFrom{$a}} keys %SimscanSpamdroppedFrom) {
+				if ($SimscanSpamdroppedFrom{$Line} >= $SimscanSpamDroppedFromThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanSpamdroppedFrom{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanSpamdroppedFrom{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+
+		# simscan spamdropped to
+		if ( (keys %SimscanSpamdroppedTo) ) {
+			print "\nSimscan Spam dropped To (Threshold of " . $SimscanSpamDroppedToThreshold . "):\n";
+			$threshold_reached=0;
+			foreach $Line (sort {$SimscanSpamdroppedTo{$b} <=> $SimscanSpamdroppedTo{$a}} keys %SimscanSpamdroppedTo) {
+				if ($SimscanSpamdroppedTo{$Line} >= $SimscanSpamDroppedToThreshold) {
+					$threshold_reached=1;
+					if ($Domains{$Line}) {
+						print "\t" . $Domains{$Line} . " [$Line] - ". $SimscanSpamdroppedTo{$Line} . " Time(s)\n";
+					}
+					else {
+						print "\t" . $Line . " - ". $SimscanSpamdroppedTo{$Line} . " Time(s)\n";
+					}
+				}
+			}
+			if ($threshold_reached < 1) {
+				print "\t" . "None found above the threshold\n";
+			}
+		}
+	}
+
+	# qmail-smtpd reports
+	if ( keys %Badmailfromemail) {
+		print "\nEmails caught by badmailfrom by email (Threshold of " . $BadMailFromEmailThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$Badmailfromemail{$b} <=> $Badmailfromemail{$a}} keys %Badmailfromemail) {
+			if ($Badmailfromemail{$Line} >= $BadMailFromEmailThreshold) {
+				$threshold_reached=1;
+				print "\t" . $Line . " - ". $Badmailfromemail{$Line} . " Time(s)\n";
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+	if ( keys %Badmailfromip) {
+		print "\nEmails caught by badmailfrom by ip: (Threshold of " . $BadMailFromIpThreshold . ")\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$Badmailfromip{$b} <=> $Badmailfromip{$a}} keys %Badmailfromip) {
+			if ($Badmailfromip{$Line} >= $BadMailFromIpThreshold) {
+				$threshold_reached=1;
+				print "\t" . $Line . " - ". $Badmailfromip{$Line} . " Time(s)\n";
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+
+	if ( keys %Badmailtoemail) {
+		print "\nEmails caught by badmailto by email (Threshold of " . $BadMailToEmailThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$Badmailtoemail{$b} <=> $Badmailtoemail{$a}} keys %Badmailtoemail) {
+			if ($Badmailtoemail{$Line} >= $BadMailToEmailThreshold) {
+				$threshold_reached=1;
+				print "\t" . $Line . " - ". $Badmailtoemail{$Line} . " Time(s)\n";
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+	if ( keys %Badmailtoip) {
+		print "\nEmails caught by badmailto by ip (Threshold of " . $BadMailToIpThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$Badmailtoip{$b} <=> $Badmailtoip{$a}} keys %Badmailtoip) {
+			if ($Badmailtoip{$Line} >= $BadMailToIpThreshold) {
+				$threshold_reached=1;
+				print "\t" . $Line . " - ". $Badmailtoip{$Line} . " Time(s)\n";
+			}
+		}
+		if ($threshold_reached < 1) {
+			print "\t" . "None found above the threshold\n";
+		}
+	}
+}
+# end high detail
+
+# show totals
+if ($TotalFrom or $TotalTo) {
+	print "\nTotals:\n";
+	printf("%27s %9s\n", "Remote connections:", $TotalFrom);
+	printf("%27s %9s\n", "Local connections:", $TotalTo);
+}
+if ($TotalBlocked) {
+	printf("%27s %9s\n", "RBL blocked:", $TotalBlocked);
+	printf("%27s %9s\n", "Grand Total From:", $GrandTotalFrom);
+	printf("%27s %2.3f %%\n", "Percentage blocked:", (($TotalBlocked/$GrandTotalFrom)*100));
+}
+
+print "\nChkuser Totals:\n";
+printf("%27s %9s\n", "Rejected:", ($TotalReject>0 ? $TotalReject : 0));
+printf("%27s %9s\n", "Accepted:", ($TotalAccept>0 ? $TotalAccept : 0));
+printf("%27s %9s\n", "Total accepted relays:", ($TotalAcceptRelay>0 ? $TotalAcceptRelay : 0));
+printf("%27s %9s\n", "Total rejected relays:", ($TotalRejectRelay>0 ? $TotalRejectRelay : 0));
+printf("%27s %9s\n", "Total viruses caught:", ($SimscanVirusTotal>0 ? $SimscanVirusTotal : 0));
+
+if ($TotalNoAuthResource) {
+	print "\nTotal No Auth Resources: $TotalNoAuthResource\n";
+}
+if ($TotalOverquota) {
+	print "\nTotal Over quota: $TotalOverquota\n";
+}
+if ($TotalRejectedIntrusion) {
+	print "\nTotal Rejected Intrusions: $TotalRejectedIntrusion\n";
+}
+if ($SimscanTotal) {
+	print "\nSimscan Total: $SimscanTotal\n";
+	$sct = sprintf("%.2f", ($Totalscantimevirus + $Totalscantimeattach + $Totalscantimeregex + $Totalscantimespam) );
+	$Maxscantimevirus = sprintf("%.2f", $Maxscantimevirus);
+	printf("%30s %9s", "Maximum Virus Scanning Time:", $Maxscantimevirus);
+	print "\n";
+	$Maxscantimeattach = sprintf("%.2f", $Maxscantimeattach);
+	printf("%30s %9s", "Maximum Attach Scanning Time:", $Maxscantimeattach);
+	print "\n";
+	$Maxscantimeregex = sprintf("%.2f", $Maxscantimeregex);
+	printf("%30s %9s", "Maximum Regex Scanning Time:", $Maxscantimeregex);
+	print "\n";
+	$Maxscantimespam = sprintf("%.2f", $Maxscantimespam);
+	printf("%30s %9s", "Maximum Spam Scanning Time:", $Maxscantimespam);
+	print "\n";
+	$Totalscantimevirus = sprintf("%.2f", $Totalscantimevirus);
+	printf("%30s %9s", "Total Virus Scanning Time:", $Totalscantimevirus);
+	print "\n";
+	$Totalscantimeattach = sprintf("%.2f", $Totalscantimeattach);
+	printf("%30s %9s", "Total Attach Scanning Time:", $Totalscantimeattach);
+	print "\n";
+	$Totalscantimeregex = sprintf("%.2f", $Totalscantimeregex);
+	printf("%30s %9s", "Total Regex Scanning Time:", $Totalscantimeregex);
+	print "\n";
+	$Totalscantimespam = sprintf("%.2f", $Totalscantimespam);
+	printf("%30s %9s", "Total Spam Scanning Time:", $Totalscantimespam);
+	print "\n";
+	printf("%30s %9s", "Total Scanning Time:", $sct);
+	print "\n";
+}
+
+if( $SimscanSpamrejectTotal ) {
+	print "\nSimscan Spam Reject: $SimscanSpamrejectTotal emails\n";
+}
+
+if( $SimscanCleanTotal ) {
+	print "\nSimscan Clean: $SimscanCleanTotal emails\n";
+	if ( $SimscanSpamrejectTotal ) {
+		printf("%30s %2.3f %%\n", "Percentage clean:", (($SimscanCleanTotal/($SimscanSpamrejectTotal+$SimscanCleanTotal))*100));
+	}
+}
+
+if( $SimscanRelayClientTotal ) {
+	print "\nSimscan RelayClient: $SimscanRelayClientTotal emails\n";
+}
+
+# simscan quarantine
+if ( $Quarantine ) {
+	print "\nSimscan Quarantine: $Quarantine emails\n";
+}
+
+
+if ($Badmailtotot) {
+	print "\nTotal badmailto: $Badmailtotot\n";
+}
+if ($Badmailfromtot) {
+	print "\nTotal badmailfrom: $Badmailfromtot\n";
+}
+
+if ($Total) {
+	print "\nTotal mail: $Total\n";
+}
+
+# warnings
+if ( (keys %Warnings) ) {
+	print "\nWarnings:\n";
+	foreach $Line (sort {$Warnings{$b} <=> $Warnings{$a}} keys %Warnings) {
+		print "\t" . $Line . " - ". $Warnings{$Line} . " Time(s)\n";
+	}
+}
+
+# other
+if (($#OtherList >= 0) and (! $IgnoreUnmatched)) {
+	print "\n**Unmatched Entries**\n";
+	print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

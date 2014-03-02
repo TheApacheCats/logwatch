@@ -1,0 +1,380 @@
+
+##########################################################################
+# $Id: amavis,v 1.56 2009/02/20 18:01:49 mike Exp $
+##########################################################################
+# $Log: amavis,v $
+# Revision 1.56  2009/02/20 18:01:49  mike
+# Patch from Ivan Varekova -mgt
+#
+# Revision 1.55  2008/06/17 21:46:40  mike
+# Roll back to pre MrC version -mgt
+#
+# Revision 1.28  2006/05/26 18:32:50  bjorn
+# Additional regexp adjustment, by 'Who Knows'.
+#
+# Revision 1.27  2006/05/21 18:17:41  bjorn
+# Complies with recent amavis releases, by Who Knows.
+#
+# Revision 1.26  2006/04/02 17:26:52  kirk
+# fixed spelling error
+#
+# Revision 1.25  2006/01/29 23:52:53  bjorn
+# Print out virus names and sender, by Felix Schwarz.
+#
+# Revision 1.24  2005/12/07 19:15:56  bjorn
+# Detect and count timeouts, by 'Who Knows'.
+#
+# Revision 1.23  2005/11/30 05:34:10  bjorn
+# Corrected regexp with space, by Markus Lude.
+#
+# Revision 1.22  2005/11/22 18:34:32  bjorn
+# Recognize 'Passed' bad headers, by "Who Knows".
+#
+# Revision 1.21  2005/10/26 05:40:43  bjorn
+# Additional patches for amavisd-new, by Mike Cappella
+#
+##########################################################################
+# This was originally written by:
+#    Jim O'Halloran <jim@kendle.com.au>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to logwatch-devel@lists.sourceforge.net and jim@kendle.com.au.
+##########################################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'};
+$CleanMsgs = 0;
+$InfectedMsgs = 0;
+$SpamMsgs = 0;
+$BannedNames = 0;
+$BadHeaders = 0;
+$IntentionallyDrop = 0;
+$NoDSNSent = 0;
+$NoQuarantine = 0;
+$Whitelisted = 0;
+$Blacklisted = 0;
+$SATimedout  = 0;
+
+# Parse logfile
+while (defined($ThisLine = <STDIN>)) {
+   $From = "";
+   $Towards = "";
+   $Virus = "";
+   $FileName = "";
+
+   $ThisLine =~ s/^\([A-z\d-]+\) //;
+   while ($ThisLine =~ s/\.\.\.$//) {
+      chomp($ThisLine);
+      $NextLine = <STDIN>;
+      $NextLine =~ s/^\([\d-]+\) \.\.\.//;
+      $ThisLine .= $NextLine;
+   }
+
+   if ( ($ThisLine =~ /^do_ascii/)
+        or ($ThisLine =~ /^Found av scanner/)
+        or ($ThisLine =~ /^Found myself/)
+        or ($ThisLine =~ /^Module/)
+        or ($ThisLine =~ /^TIMING/)
+        or ($ThisLine =~ /^Checking/)
+        or ($ThisLine =~ /^(ESMTP|FWD|SEND) via/)
+        or ($ThisLine =~ /^spam_scan/)
+        or ($ThisLine =~ /^Not-Delivered/)
+        or ($ThisLine =~ /^SpamControl/)
+        or ($ThisLine =~ /^SPAM-TAG/)
+        or ($ThisLine =~ /SPAM\.TAG2/)
+        or ($ThisLine =~ /BAD-HEADER\.TAG2/)
+        or ($ThisLine =~ /^Net/)
+        or ($ThisLine =~ /^Perl/)
+        or ($ThisLine =~ /^ESMTP/)
+        or ($ThisLine =~ /^LMTP/)
+        or ($ThisLine =~ /^.* code[ \t]+(NOT)? loaded/)
+        or ($ThisLine =~ /^tempdir being removed/)
+        or ($ThisLine =~ /^(?:Found|Internal|No) decoder for/)
+        or ($ThisLine =~ /^Found primary av scanner/)
+        or ($ThisLine =~ /^Found \$[\S]+[\s]+at/)
+        or ($ThisLine =~ /^No \$[\S]+,[\s]+not using it/)
+        or ($ThisLine =~ /^Found secondary av scanner/)
+        or ($ThisLine =~ /^Using (?:primary |secondary )?internal av scanner code/)
+        or ($ThisLine =~ /^mail_via_smtp/)
+        or ($ThisLine =~ /^local delivery: /)
+        or ($ThisLine =~ /^cached [a-zA-Z0-9]+ /)
+        or ($ThisLine =~ /^loaded policy bank/)
+        or ($ThisLine =~ /^wbl: soft-whitelisted/)
+        or ($ThisLine =~ /^p\d+ \d+(\/\d+)* Content-Type: /)
+        or ($ThisLine =~ /^Requesting (a |)process rundown after [0-9]+ tasks/)
+        or ($ThisLine =~ /^NOTICE: Not sending DSN, spam level [0-9.]+ exceeds DSN cutoff level/)
+        or ($ThisLine =~ /skip local delivery\([0-9]\): <> -> <(spam|bad-header|banned|virus)-quarantine>*/)
+        or ($ThisLine =~ /config files read: .*amavisd.conf/)
+        or ($ThisLine =~ /mangling by .* \([0-9]\) done, new size: [0-9]*, orig [0-9]* bytes/)
+        or ($ThisLine =~ /mangling by: [0-9], <.*>/)
+        or ($ThisLine =~ /mangling YES: [0-9] \(orig: [0-9]\), discl_allowed=.*, <.*> -> <.*>/)
+        or ($ThisLine =~ /^initializing Mail::SpamAssassin/)
+        or ($ThisLine =~ /^SpamAssassin debug facilities/)
+        or ($ThisLine =~ /^SpamAssassin loaded plugins/)
+        or ($ThisLine =~ /^logging initialized,/)
+        or ($ThisLine =~ /^extra modules loaded/)
+        or ($ThisLine =~ /^INFO: no optional modules/)
+        or ($ThisLine =~ /^INFO: SA version/)
+        or ($ThisLine =~ /NOT loaded$/)
+        or ($ThisLine =~ /^(?:Local-out|AM.PDP-in) proto code loaded/)
+        or ($ThisLine =~ /^\.\.\./)
+        or ($ThisLine =~ /^Creating db in/)
+        or ($ThisLine =~ /^dkim: (?:VALID|FAILED)/)
+        or ($ThisLine =~ /^Open relay\?/)
+        or ($ThisLine =~ /^user=.*, EUID/)
+        or ($ThisLine =~ /^starting.  \S*amavisd at/) ) {
+       # We don't care about these
+   } elsif ($ThisLine =~ /^Passed( CLEAN)?, /) {
+      $CleanMsgs++;
+   } elsif (($FileName, $From) = ( $ThisLine =~ /^(?:Blocked )?BANNED (?:name\/type )?\(([^\)]+)\)\, (?:\[([^\]]*)\] )*\<([^\>]*)\>/ )) {
+
+      $BannedNames++;
+
+      if ($Detail >= 10) {
+          $Banned{$FileName}{$From}++;
+      }; # if
+
+   } elsif (($Virus, $FromIP, $From) = ( $ThisLine =~ /^(?:Virus found - quarantined|INFECTED|Blocked INFECTED) \(([^\)]+)\)\, (?:\[([^\]]*)\] )*[\(\<]([^\>\)]*)[\)\>]/ )) {
+
+      $InfectedMsgs++;
+
+      if (defined($From)){
+         $From="$From [$FromIP]" if defined($FromIP);
+      }
+      else {
+         $From="[$FromIP]";
+      }
+
+      if ($Detail >= 5) {
+        $Virustypes{$Virus}++;
+      }; # if
+
+      if ($Detail >= 10) {
+        $Viruses{$Virus}{$From}++;
+      }; # if
+
+   } elsif (($FromIP, $Fromspam, $Towards) = ( $ThisLine =~ /^(?:Passed )?(?:SPAM|SPAMMY|Blocked SPAM|Blocked SPAMMY), (?:\[([^\]]*)\] )*[(<]([^>)]*)[)>] -\> [\(\<]([^\>\)]+)[\)\>]/ )) {
+      $SpamMsgs++;
+
+      if ($Fromspam =~ /^$/) {
+         $Fromspam="[$FromIP]";
+      }
+      else {
+         $Fromspam="$Fromspam [$FromIP]" if defined($FromIP);
+      }
+
+      if ($Detail >= 5) {
+        $Spamtypes{$Towards}++;
+      }; # if
+
+      if ($Detail >= 10) {
+
+            #print "Fromspam is '", $Fromspam, "', ";
+            #print "Towards is '", $Towards, "'\n";
+        $Spams{$Towards}{$Fromspam}++;
+      }; # if
+
+   } elsif (($Towards) = ( $ThisLine =~ /^(?:Passed )?SPAM, \<\> -\> [\(\<]([^\>\)]+)[\)\>]/ )) {
+      $SpamMsgs++;
+
+      if ($Detail >= 5) {
+        $Spamtypes{$Towards}++;
+      }; # if
+
+      if ($Detail >= 10) {
+        $Spams{$Towards}{"<>"}++;
+      }; # if
+
+   } elsif (($FromIP, $From, $Why) = ( $ThisLine =~ /^(?:Blocked |Passed )?BAD[ -]HEADER(?: from|\,) (?:\[([^\]]*)\] )*[\(\<]([^\>\)]+)[\)\>](?: -\> [\(\<](?:[^\>\)]+)[\)\>])[^\:]*(?:\: (.*) in message header)?/ )) {
+      $BadHeaders++;
+
+      if (defined($From)){
+         $From="$From [$FromIP]" if defined($FromIP);
+      }
+      else {
+         $From="[$FromIP]";
+      }
+
+      $Why="" if not defined($Why);
+
+      if ($Detail >= 10) {
+        $Headers{$From}{$Why}++;
+      }; # if
+
+   } elsif ( $ThisLine =~ /^NOTICE: Not sending DSN, spam level exceeds DSN cutoff level(| for all recips), mail intentionally dropped/ ) {
+      $NoDSNSent++;
+   } elsif ( $ThisLine =~ /^do_spam: spam level exceeds quarantine cutoff level/ ) {
+      $NoQuarantine++;
+   } elsif ( $ThisLine =~ /^NOTICE: DSN contains SPAM; bounce is not bouncible, mail intentionally dropped/ ) {
+      $IntentionallyDrop++;
+   } elsif ( $ThisLine =~ /^NOTICE: Not sending DSN to believed-to-be-faked sender/ ) {
+      $IntentionallyDrop++;
+		#I'm not incrementing infections since that was caught by INFECTED
+      #$InfectedMsgs++;
+   } elsif ( $ThisLine =~ /^NOTICE: DSN contains VIRUS; bounce is not bouncable, mail intentionally dropped/ ) {
+      $IntentionallyDrop++;
+      $InfectedMsgs++;
+   } elsif ( $ThisLine =~ /^NOTICE: DSN contains BANNED NAME; bounce is not bouncable, mail intentionally dropped/ ) {
+      $IntentionallyDrop++;
+      $BannedNames++;
+   } elsif ( $ThisLine =~ /^NOTICE: DSN contains VIRUS & BANNED NAME; bounce is not bouncable, mail intentionally dropped/ ) {
+      $IntentionallyDrop++;
+      $BannedNames++;
+      $InfectedMsgs++;
+   } elsif ( $ThisLine =~ /^NOTICE: DSN contains VIRUS & BAD HEADER; bounce is not bouncable, mail intentionally dropped/ ) {
+      $IntentionallyDrop++;
+      $BadHeaders++;
+      $InfectedMsgs++;
+   } elsif ( $ThisLine =~ /^NOTICE: DSN contains VIRUS & BANNED NAME & BAD HEADER; bounce is not bouncable, mail intentionally dropped/ ) {
+      $IntentionallyDrop++;
+      $BadHeaders++;
+      $InfectedMsgs++;
+      $BannedNames++;
+   } elsif ( $ThisLine =~ /^SA TIMED OUT,/ ) {
+      $SATimedout++;
+   } elsif (($ThisLine =~ /^white_black_list: whitelisted sender/ )
+	 		or ( $ThisLine =~ /.* WHITELISTED/) ) {
+	 		$Whitelisted++;
+   } elsif (($ThisLine =~ /^white_black_list: blacklisted sender/ )
+	 		or ( $ThisLine =~ /.* BLACKLISTED/) ) {
+	 		$Blacklisted++;
+   } else {
+      # Report any unmatched entries...
+      chomp($ThisLine);
+      $OtherList{$ThisLine}++;
+   } # else
+} # while
+
+
+#######################################################
+# Output report
+
+if ($CleanMsgs > 0) {
+   print "\n$CleanMsgs messages checked and passed.\n";
+}; # if
+
+if ($InfectedMsgs > 0) {
+   print "$InfectedMsgs virus infected messages were found.\n";
+}; # if
+
+if ($SpamMsgs > 0) {
+   print "$SpamMsgs spam messages were found.\n";
+}; # if
+
+if ($BannedNames > 0) {
+   print "$BannedNames messages rejected with banned file names.\n";
+}; # if
+
+if ($BadHeaders > 0) {
+   print "$BadHeaders messages with bad headers were found.\n";
+}; # if
+
+if ($IntentionallyDrop > 0) {
+   print "$IntentionallyDrop messages intentionally dropped (bad DSN).\n";
+};
+
+if ($NoDSNSent > 0) {
+   print "$NoDSNSent DSNs intentionally not sent (spam level exceeds DSN cutoff level).\n";
+};
+
+if ($NoQuarantine > 0) {
+   print "$NoQuarantine messages destined for quarantine intentionally not quarantined (spam level exceeds quarantine cutoff level).\n";
+};
+
+if($SATimedout > 0) {
+   print "$SATimedout messages caused SpamAssassin to timeout during message processing.\n";
+};
+
+if ($Whitelisted > 0 && $Detail >= 5) {
+   print "$Whitelisted messages were whitelisted.\n";
+};
+
+if ($Blacklisted > 0 && $Detail >= 5) {
+   print "$Blacklisted messages were blacklisted.\n";
+};
+
+if ((keys %Virustypes)) {
+   print "\nViruses Detected:\n";
+   foreach $Virus (sort keys %Virustypes) {
+      if ($Detail < 10 && $Detail >= 5) {
+         print "   $Virus: $Virustypes{$Virus} Times(s)\n";
+      } elsif ($Detail >= 10) {
+         $VirCount = 0;
+         $OutString = "";
+         foreach $From (sort keys %{ $Viruses{$Virus}}) {
+            $VirCount += $Viruses{$Virus}{$From};
+            $OutString .= "      $From  $Viruses{$Virus}{$From} Time(s)\n";
+         }; # foreach
+         print "   $Virus: $VirCount Times(s)  From:\n$OutString\n";
+      }; # if
+   }; # foreach
+
+}; # if
+
+if ((keys %Spams)) {
+   print "\nSpam Detected:\n";
+   foreach $Towards (sort keys %Spams) {
+      if ($Detail < 10 && $Detail >= 5) {
+         print "   Spam to $Towards: $Spamtypes{$Towards} Times(s)\n";
+      } elsif ($Detail >=10) {
+         $SpamCount = 0;
+         $OutString = "";
+         foreach $From (sort keys %{ $Spams{$Towards}}) {
+
+            $SpamCount += $Spams{$Towards}{$From};
+            #print "From is '", $From, "'\n";
+            if ($From =~ /^$/) {
+               $OutString .= "      <>";
+            }
+            else {
+               $OutString .= "      $From  ";
+            }
+            $OutString .= "  $Spams{$Towards}{$From} Time(s)\n";
+         }; # foreach
+         print "   Spam to $Towards: $SpamCount Times(s) From:\n$OutString\n";
+      }; # if
+   }; # foreach
+
+}; # if
+
+if ((keys %Headers) && $Detail >= 10) {
+   print "\nBad Headers Detected:\n";
+   foreach $From (sort keys %Headers) {
+      $Count = 0;
+      $OutString = "";
+      foreach $Why (sort keys %{ $Headers{$From}}) {
+         $Count += $Headers{$From}{$Why};
+         $OutString .= "      $Why  $Headers{$From}{$Why} Time(s)\n";
+      }; # foreach
+      print "   Bad Header from $From: $Count Times(s) Reason(s):\n$OutString\n";
+   }; # foreach
+}; # if
+
+if (keys %Banned) {
+  print "\nBanned File Names:\n";
+   foreach $FileName (sort keys %Banned) {
+      $BanCount = 0;
+      $OutString = "";
+      foreach $From (sort keys %{ $Banned{$FileName}}) {
+         $BanCount += $Banned{$FileName}{$From};
+         $OutString .= "      $From  $Banned{$FileName}{$From} Time(s)\n";
+      }; # foreach
+      print "   $FileName: $BanCount Times(s)  From:\n$OutString\n";
+   }; # foreach
+}; # if
+
+
+if (keys %OtherList) {
+   print "\n\n**Unmatched Entries**\n";
+   foreach $line (sort {$OtherList{$b}<=>$OtherList{$a} } keys %OtherList) {
+      print "   $line: $OtherList{$line} Time(s)\n";
+   }; # foreach
+}; # if
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

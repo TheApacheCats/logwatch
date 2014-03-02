@@ -1,0 +1,596 @@
+##########################################################################
+# $Id: netscreen,v 1.6 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Laurent DUFOUR <laurent.dufour@havas.com>,<dufour_l@hotmail.com>
+#    based on the work of
+#    Kirk Bauer <kirk@kaybee.org>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to laurent.dufour@havas.com
+########################################################
+
+#####################################################
+## Copyright (c) 2008 Laurent DUFOUR
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':all';
+
+$Debug = ValueOrDefault($ENV{'LOGWATCH_DEBUG'}, 0);
+$Detail = ValueOrDefault($ENV{'LOGWATCH_DETAIL_LEVEL'}, 0);
+
+# Avoid "Use of uninitialized value" warning messages.
+sub ValueOrDefault {
+    my ($value, $default) = @_;
+    return ($value ? $value : $default);
+}
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside NETSCREEN Filter \n\n";
+    $DebugCounter = 1;
+}
+
+
+my ($month,$day,$time,$host_ip,$host,$conn,$msg,$message);
+
+while (defined($ThisLine = <STDIN>)) {
+    if ( $Debug >= 30 ) {
+	print STDERR "DEBUG($DebugCounter): $ThisLine";
+	$DebugCounter++;
+    }
+
+($month,$day,$time,$host_ip,$host,$msg)=split(/ +/,$ThisLine,7);
+
+   if ( ($ThisLine =~ /traffic/ ) or
+         ($ThisLine =~ /Copyright/ ) or
+         ($ThisLine =~ /removed due to simultaneous rekey/ ) or
+         ($ThisLine =~ /Responded to the first peer message/ ) or
+         ($ThisLine =~ /NBR change/ ) or
+         ($ThisLine =~ /accept udp/ ) or
+         ($ThisLine =~ /accept tcp/ ) or
+         ($ThisLine =~ /accept icmp/ ) or
+         ($ThisLine =~ /accept ip/ ) or
+         ($ThisLine =~ /denied udp/ ) or
+         ($ThisLine =~ /denied tcp/ ) or
+         ($ThisLine =~ /denied icmp/ ) or
+         ($ThisLine =~ /denied ip/ )
+    ) {
+      # don't care about this, will code this later
+   }
+   elsif ( ($interface) = ($ThisLine =~ /vpn "(.*)" is up./) ) {
+      $VPNUp{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /vpn "(.*)" is down./) ) {
+      $VPNDown{$host}{$interface}++;
+   }
+   elsif ( ($src_ip,$dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> >> <(.+)> Phase 1: Initiated negotiations in aggressive mode. (.*)/) ) {
+      $InitAggMode{$host}{$src_ip," ",$dst_ip}++;
+   }
+   elsif ( ($src_ip,$dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> >> <(.+)> Phase 1: Initiated negotiations in main mode. (.*)/) ) {
+      $InitMainMode{$host}{$src_ip," ",$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Phase 2: Initiated negotiation. (.*)/) ) {
+      $InitPh2{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Phase 1: Completed Main mode negotiations (.*)/) ) {
+      $Ph1CompleteMainMode{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Phase 1: Aborted negotiations because the time limit has elapsed. (.*)/) ) {
+      $Ph1Aborted{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Phase 1: Completed Aggressive mode negotiations (.*)/) ) {
+      $Ph1CompleteAggMode{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Heartbeats have been disabled because the peer is not sending them. (.*)/) ) {
+      $HeartBeatDisabled{$host}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Heartbeats have been lost (.*)/) ) {
+      $HeartBeatLost{$host}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Received notify message for DOI (.*)/) ) {
+      $ReceiveDOI{$host}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Missing heartbeats have exceeded the threshold. (.*)/) ) {
+      $HeartBeatMissing{$host}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)>: Received a bad SPI (.*)/) ) {
+      $BadSPI{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Phase 1: Responder starts AGGRESSIVE mode negotiations. (.*)/) ) {
+      $Ph1DstStartAggMode{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Phase 1: Responder starts MAIN mode negotiations. (.*)/) ) {
+      $Ph1DstStartMainMode{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Added Phase 2 session tasks to the task list. (.*)/) ) {
+      $Ph2NegoAdded{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Phase 2 negotiation request is already in the task list. (.*)/) ) {
+      $Ph2NegoAlready{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /System Config saved from host (\d+\.\d+\.\d+\.\d+) (.*)/) ) {
+      $SysCfgSaved{$host}{LookupIP($dst_ip)}++;
+   }
+
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /The system configuration was saved from host (.+) by (.*)/) ) {
+      $SysCfgSaved{$host}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /IKE<(.+)> Phase 2: Received a message but did not check a policy because id-mode is set to IP or policy-checking is disabled. (.*)/) ) {
+      $Ph2RcvMsg{$host}{$dst_ip}++;
+   }
+   elsif ( ($ThisLine =~ /Compiled/) ) {
+      $Started{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Phase 1: Retransmission limit has been reached./) ) {
+      $RetransmissionReached{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Completed negotiations with SPI/) ) {
+      $NegoCompleted{$host}++;
+   }
+   elsif ( ($ThisLine =~ /DNS entries have been automatically refreshed./) ) {
+      $DNSRefreshed{$host}++;
+   }
+   elsif ( ($ThisLine =~ /DNS has been refreshed./) ) {
+      $DNSRefreshed{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog host domain name has been changed/) ) {
+      $SyslogHost{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog facility has been changed/) ) {
+      $SyslogFacility{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog security facility has been changed/) ) {
+      $SyslogFacility{$host}++;
+   }
+   elsif ( ($ThisLine =~ /The system clock has been updated through NTP./) ) {
+      $NTPUpdated{$host}++;
+   }
+   elsif ( ($ThisLine =~ /failed to get clock through NTP/) ) {
+      $NTPFailed{$host}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /A DHCP- assigned IP address (.*)/) ) {
+      $DHCPAssigned{$host}{"A DHCP- assigned IP address"}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /One or more DHCP-assigned IP addresses have been manually released. (.*)/) ) {
+      $DHCPReleased{$host}{"One or more DHCP-assigned IP addresses have been manually released."}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RELOAD: (.*)/) ) {
+      $ReloadRequested{$host}{$message}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RESTART: (.*)/) ) {
+      $Restarted{$host}{$message}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /Admin User "(\S+)" logged in for Web\((\S+)\) management \(port (\d+)\) from (.+):(.+). (.*)/) ) {
+       if ($Debug >= 5) {
+	   print STDERR "DEBUG: Found -$1 logged in from $4 using $2\n";
+       }
+       if ($Detail >= 20) {
+	   $Users{$host}{$2}{$4}{$1}++;
+       } else {
+	   $Users{$host}{$2}{$4}{"(all)"}++;
+       }
+   }
+   elsif ( $ThisLine =~ m/Admin user (\S+) login attempt for (\S+) management \(port (\d+)\) from (.+):(.+). failed. (.*)/ ) {
+       if ( $Debug >= 5 ) {
+	   print STDERR "DEBUG: Found -Failed login- line\n";
+       }
+       my $name = LookupIP($4);
+       $BadLogins{$host}{"$1/$2 from $name"}++;
+   }
+   elsif ( $ThisLine =~ m/SSH client at (.+) has attempted to make an SCS connection to interface untrust with IP (.+) but failed (.*)/ ) {
+       my $name = LookupIP($2);
+       $Temp = "SSH from $name";
+       $BadLogins{$host}{$Temp}++;
+       $IllegalUsers{$host}{$Temp}++;
+   }
+else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if (keys %Started) {
+   print "\nDevice started :\n";
+   foreach $ThisOne (keys %Started) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Started{$ThisOne}}) {
+         print "\t Started" .$ThatOne . "\t: " . $Started{$ThisOne}{$ThatOne} . "{ Time(s)\n";
+      }
+   }
+}
+
+if (keys %RetransmissionReached) {
+   print "\nDevice where retransmission limit has been reached:\n";
+   foreach $ThisOne (keys %RetransmissionReached) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$RetransmissionReached{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $RetransmissionReached{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %NegoCompleted) ) {
+   print "\nDevice wich completed negotiations with SPI:\n";
+   foreach $ThisOne (keys %NegoCompleted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NegoCompleted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NegoCompleted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPUpdated) {
+   print "\nDevice where The system clock has been updated through NTP :\n";
+   foreach $ThisOne (keys %NTPUpdated) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NTPUpdated{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPUpdated{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPFailed) {
+   print "\nDevice where failed to get clock through NTP :\n";
+   foreach $ThisOne (keys %NTPFailed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NTPFailed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPFailed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %DNSRefreshed) {
+   print "\nDevice where DNS have been refreshed  :\n";
+   foreach $ThisOne (keys %DNSRefreshed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$DNSRefreshed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DNSRefreshed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %DNSRefreshed) {
+   print "\nDevice where DNS have been refreshed  :\n";
+   foreach $ThisOne (keys %DNSRefreshed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$DNSRefreshed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DNSRefreshed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %DHCPAssigned) ) {
+   print "\nDevice where DHCP have been assigned  :\n";
+   foreach $ThisOne (keys %DHCPAssigned) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$DHCPAssigned{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DHCPAssigned{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %DHCPReleased) ) {
+   print "\nDevice where DHCP have been released  :\n";
+   foreach $ThisOne (keys %DHCPReleased) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$DHCPReleased{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DHCPReleased{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SyslogFacility) {
+   print "\nDevice where Syslog facility has been changed  :\n";
+   foreach $ThisOne (keys %SyslogFacility) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SyslogFacility{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SyslogFacility{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SyslogHost) {
+   print "\nDevice where Syslog host has been changed  :\n";
+   foreach $ThisOne (keys %SyslogHost) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SyslogHost{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SyslogHost{$ThisOne}{$ThisOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if (keys %Restarted) {
+   print "\nDevice restarted :\n";
+   foreach $ThisOne (keys %Restarted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Restarted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Restarted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ReloadRequested) {
+   print "\nDevice reload requested :\n";
+   foreach $ThisOne (keys %ReloadRequested) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ReloadRequested{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ReloadRequested{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %HeartBeatDisabled) {
+   print "\nDevice where heartbeat have been disabled because of peer :\n";
+   foreach $ThisOne (keys %HeartBeatDisabled) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$HeartBeatDisabled{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $HeartBeatDisabled{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %HeartBeatLost) {
+   print "\nDevice where heartbeat have been lost :\n";
+   foreach $ThisOne (keys %HeartBeatLost) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$HeartBeatLost{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $HeartBeatLost{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %HeartBeatMissing) {
+   print "\nDevice where missing heartbeats have exceeded the threshold. :\n";
+   foreach $ThisOne (keys %HeartBeatMissing) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$HeartBeatMissing{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $HeartBeatMissing{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %BadSPI) {
+   print "\nDevice receiving a bad SPI :\n";
+   foreach $ThisOne (keys %BadSPI) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$BadSPI{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $BadSPI{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ReceivedDOI) {
+   print "\nDevice where notify message for DOI hed been received :\n";
+   foreach $ThisOne (keys %ReceivedDOI) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ReceivedDOI{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ReceivedDOI{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %VPNUp) {
+   print "\nVPN Up on :\n";
+   foreach $ThisOne (keys %VPNUp) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$VPNUp{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $VPNUp{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %VPNDown) {
+   print "\nVPN Down on :\n";
+   foreach $ThisOne (keys %VPNDown) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$VPNDown{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $VPNDown{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ($Detail >= 15) {
+
+if (keys %InitAggMode) {
+   print "\nDevice initiating phase 1 aggresive mode:\n";
+   foreach $ThisOne (keys %InitAggMode) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$InitAggMode{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $InitAggMode{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %InitMainMode) {
+   print "\nDevice initiating phase 1 main mode:\n";
+   foreach $ThisOne (keys %InitMainMode) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$InitMainMode{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $InitMainMode{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Ph1DstStartAggMode) {
+   print "\nDevice with Phase 1: Responder starts AGGRESSIVE mode negotiations. :\n";
+   foreach $ThisOne (keys %Ph1DstStartAggMode) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Ph1DstStartAggMode{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Ph1DstStartAggMode{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Ph1DstStartMainMode) {
+   print "\nDevice with Phase 1: Responder starts MAIN mode negotiations. :\n";
+   foreach $ThisOne (keys %Ph1DstStartMainMode) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Ph1DstStartMainMode{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Ph1DstStartMainMode{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if (keys %Ph1CompleteAggMode) {
+   print "\nDevice with Phase 1: Completed Aggressive mode negotiations :\n";
+   foreach $ThisOne (keys %Ph1CompleteAggMode) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Ph1CompleteAggMode{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Ph1CompleteAggMode{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Ph1CompleteMainMode) {
+   print "\nDevice with Phase 1: Completed Main mode negotiations :\n";
+   foreach $ThisOne (keys %Ph1CompleteMainMode) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Ph1CompleteMainMode{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Ph1CompleteMainMode{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Ph1Aborted) {
+   print "\nDevice with Phase 1: Aborted negotiations because the time limit has elapsed. :\n";
+   foreach $ThisOne (keys %Ph1Aborted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Ph1Aborted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Ph1Aborted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %InitPh2) {
+   print "\nDevice initiating phase 2 :\n";
+   foreach $ThisOne (keys %InitPh2) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$InitPh2{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $InitPh2{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Ph2NegoAdded) {
+   print "\nDevice with Added Phase 2 session tasks to the task list. :\n";
+   foreach $ThisOne (keys %Ph2NegoAdded) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Ph2NegoAdded{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Ph2NegoAdded{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Ph2NegoAlready) {
+   print "\nDevice with Phase 2 negotiation request is already in the task list. :\n";
+   foreach $ThisOne (keys %Ph2NegoAlready) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Ph2NegoAlready{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Ph2NegoAlready{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Ph2RcvMsg) {
+   print "\nDevice with Phase 2: Received a message but did not check a policy because id-mode is set to IP or policy-checking is disabled. :\n";
+   foreach $ThisOne (keys %Ph2RcvMsg) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Ph2RcvMsg{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Ph2RcvMsg{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+}
+
+
+if (keys %SysCfgSaved) {
+   print "\nDevice where system config have been saved :\n";
+   foreach $ThisOne (keys %SysCfgSaved) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SysCfgSaved{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SysCfgSaved{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+
+if (keys %BadLogins) {
+    print "\nFailed logins from these:\n";
+    foreach $ThisOne (keys %BadLogins) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$BadLogins{$ThisOne}}) {
+	    print "\t   $_: $BadLogins{$ThisOne}{$_} Time(s)\n";
+	}
+    }
+}
+
+if (keys %IllegalUsers) {
+    print "\nIllegal users from these:\n";
+    foreach $ThisOne (keys %IllegalUsers) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$IllegalUsers{$ThisOne}}) {
+	    print "\t   $_: $IllegalUsers{$ThisOne}{$_} Time(s)\n";
+
+	}
+    }
+}
+
+
+if (keys %Users) {
+    print "\nUsers logging in through :\n";
+foreach $ThisOne (keys %Users) {
+    print "   " . $ThisOne . ":\n";
+
+foreach $user (sort {$a cmp $b} keys %{$Users{$ThisOne}}) {
+    print "   $user:\n";
+    my $totalSort = TotalCountOrder(%{$Users{$ThisOne}{$user}}, \&SortIP);
+    foreach my $ip (sort $totalSort keys %{$Users{$ThisOne}{$user}}) {
+	my $name = LookupIP($ip);
+	if ($Detail >= 20) {
+            print "      $name:\n";
+            my $sort = CountOrder(%{$Users{$ThisOne}{$user}{$ip}});
+            foreach my $method (sort $sort keys %{$Users{$ThisOne}{$user}{$ip}}) {
+		my $val = $Users{$ThisOne}{$user}{$ip}{$method};
+		my $plural = ($val > 1) ? "s" : "";
+		print "         $method: $val time$plural\n";
+            }
+	} else {
+            my $val = (values %{$Users{$ThisOne}{$user}{$ip}})[0];
+            my $plural = ($val > 1) ? "s" : "";
+            print "      $name: $val time$plural\n";
+	}
+    }
+}
+}
+}
+
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

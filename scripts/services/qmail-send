@@ -1,0 +1,485 @@
+##########################################################################
+# $Id: qmail-send,v 1.3 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: qmail-send,v $
+# Revision 1.3  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.2  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.1  2005/09/07 00:37:59  bjorn
+# New qmail multilog files written by Bob Hutchinson
+#
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Bob Hutchinson
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'};
+$QmailDetail = $ENV{'qmail_high_detail'};
+$QmailThreshold = $ENV{'threshold'};
+$RemoteThreshold = $ENV{'remote_threshold'};
+$LocalThreshold  = $ENV{'local_threshold'};
+$FromThreshold   = $ENV{'from_threshold'};
+$SmtpCode{'211'} = "System status, or system help reply.";
+$SmtpCode{'214'} = "Help message.";
+$SmtpCode{'220'} = "Domain service ready. Ready to start TLS.";
+$SmtpCode{'221'} = "Domain service closing transmission channel.";
+$SmtpCode{'250'} = "Requested mail action OK, completed.";
+$SmtpCode{'251'} = "User not local, will forward to forwardpath.";
+$SmtpCode{'252'} = "Cannot VRFY user, but will take message for this user and attempt delivery.";
+$SmtpCode{'253'} = "OK, messages pending messages for node node started.";
+$SmtpCode{'354'} = "Start mail input; end with <CRLF>.<CRLF>.";
+$SmtpCode{'355'} = "Octet-offset is the transaction offset.";
+$SmtpCode{'421'} = "Domain service not available, closing transmission channel.";
+$SmtpCode{'432'} = "A password transition is needed.";
+$SmtpCode{'450'} = "Requested mail action not taken: mailbox unavailable. ATRN request refused.";
+$SmtpCode{'451'} = "Requested action aborted: local error in processing. Unable to process ATRN request now";
+$SmtpCode{'452'} = "Requested action not taken: insufficient system storage.";
+$SmtpCode{'453'} = "You have no mail.";
+$SmtpCode{'454'} = "TLS not available due to temporary reason. Encryption required for requested authentication mechanism.";
+$SmtpCode{'458'} = "Unable to queue messages for node node.";
+$SmtpCode{'459'} = "Node node not allowed: reason.";
+$SmtpCode{'500'} = "Command not recognized: command Syntax error.";
+$SmtpCode{'501'} = "Syntax error, no parameters allowed.";
+$SmtpCode{'502'} = "Command not implemented.";
+$SmtpCode{'503'} = "Bad sequence of commands.";
+$SmtpCode{'504'} = "Command parameter not implemented.";
+$SmtpCode{'511'} = "Bad destination mailbox address";
+$SmtpCode{'521'} = "Machine does not accept mail.";
+$SmtpCode{'530'} = "Must issue a STARTTLS command first. Encryption required for requested authentication mechanism.";
+$SmtpCode{'534'} = "Authentication mechanism is too weak.";
+$SmtpCode{'538'} = "Encryption required for requested authentication mechanism.";
+$SmtpCode{'550'} = "Requested action not taken: mailbox unavailable.";
+$SmtpCode{'551'} = "User not local; please try forwardpath.";
+$SmtpCode{'552'} = "Requested mail action aborted: exceeded storage allocation.";
+$SmtpCode{'553'} = "Requested action not taken: mailbox name not allowed.";
+$SmtpCode{'554'} = "Transaction failed.";
+
+#ErrorCodes
+# Success
+## X.0.X Other or Undefined Status
+$ErrorCode{'2.0.1'} = "Success: Undefined Status";
+$ErrorCode{'2.0.2'} = "Success: Undefined Status";
+$ErrorCode{'2.0.3'} = "Success: Undefined Status";
+$ErrorCode{'2.0.4'} = "Success: Undefined Status";
+$ErrorCode{'2.0.5'} = "Success: Undefined Status";
+$ErrorCode{'2.0.6'} = "Success: Undefined Status";
+$ErrorCode{'2.0.7'} = "Success: Undefined Status";
+$ErrorCode{'2.0.8'} = "Success: Undefined Status";
+## X.1.X   Addressing Status
+$ErrorCode{'2.1.1'} = "Success: Bad destination mailbox address";
+$ErrorCode{'2.1.2'} = "Success: Bad destination system address";
+$ErrorCode{'2.1.3'} = "Success: Bad destination mailbox address syntax";
+$ErrorCode{'2.1.4'} = "Success: Destination mailbox address ambiguous";
+$ErrorCode{'2.1.5'} = "Success: Destination mailbox address valid";
+$ErrorCode{'2.1.6'} = "Success: Mailbox has moved";
+$ErrorCode{'2.1.7'} = "Success: Bad sender's mailbox address syntax";
+$ErrorCode{'2.1.8'} = "Success: Bad sender's system address";
+## X.2.X   Mailbox Status
+$ErrorCode{'2.2.0'} = "Success: Other or undefined mailbox status";
+$ErrorCode{'2.2.1'} = "Success: Mailbox disabled, not accepting messages";
+$ErrorCode{'2.2.2'} = "Success: Mailbox full";
+$ErrorCode{'2.2.3'} = "Success: Message length exceeds administrative limit";
+$ErrorCode{'2.2.4'} = "Success: Mailing list expansion problem";
+## X.3.X   Mail System Status
+$ErrorCode{'2.3.0'} = "Success: Other or undefined mail system status";
+$ErrorCode{'2.3.1'} = "Success: Mail system full";
+$ErrorCode{'2.3.2'} = "Success: System not accepting network messages";
+$ErrorCode{'2.3.3'} = "Success: System not capable of selected features";
+$ErrorCode{'2.3.4'} = "Success: Message too big for system";
+## X.4.X   Network and Routing Status
+$ErrorCode{'2.4.0'} = "Success: Other or undefined network or routing status";
+$ErrorCode{'2.4.1'} = "Success: No answer from host";
+$ErrorCode{'2.4.2'} = "Success: Bad connection";
+$ErrorCode{'2.4.3'} = "Success: Routing server failure";
+$ErrorCode{'2.4.4'} = "Success: Unable to route";
+$ErrorCode{'2.4.5'} = "Success: Network congestion";
+$ErrorCode{'2.4.6'} = "Success: Routing loop detected";
+$ErrorCode{'2.4.7'} = "Success: Delivery time expired";
+## X.5.X   Mail Delivery Protocol Status
+$ErrorCode{'2.5.0'} = "Success: Other or undefined protocol status";
+$ErrorCode{'2.5.1'} = "Success: Invalid command";
+$ErrorCode{'2.5.2'} = "Success: Syntax error";
+$ErrorCode{'2.5.3'} = "Success: Too many recipients";
+$ErrorCode{'2.5.4'} = "Success: Invalid command arguments";
+$ErrorCode{'2.5.5'} = "Success: Wrong protocol version";
+## X.6.X   Message Content or Media Status
+$ErrorCode{'2.6.0'} = "Success: Other or undefined media error";
+$ErrorCode{'2.6.1'} = "Success: Media not supported";
+$ErrorCode{'2.6.2'} = "Success: Conversion required and prohibited";
+$ErrorCode{'2.6.3'} = "Success: Conversion required but not supported";
+$ErrorCode{'2.6.4'} = "Success: Conversion with loss performed";
+$ErrorCode{'2.6.5'} = "Success: Conversion failed";
+## X.7.X   Security or Policy Status
+$ErrorCode{'2.7.0'} = "Success: Other or undefined security status";
+$ErrorCode{'2.7.1'} = "Success: Delivery not authorized, message refused";
+$ErrorCode{'2.7.2'} = "Success: Mailing list expansion prohibited";
+$ErrorCode{'2.7.3'} = "Success: Security conversion required but not possible";
+$ErrorCode{'2.7.4'} = "Success: Security features not supported";
+$ErrorCode{'2.7.5'} = "Success: Cryptographic failure";
+$ErrorCode{'2.7.6'} = "Success: Cryptographic algorithm not supported";
+$ErrorCode{'2.7.7'} = "Success: Message integrity failure";
+# Persistent Transient Failure
+## X.0.X Other or Undefined Status
+$ErrorCode{'4.0.1'} = "Deferral: Undefined Status";
+$ErrorCode{'4.0.2'} = "Deferral: Undefined Status";
+$ErrorCode{'4.0.3'} = "Deferral: Undefined Status";
+$ErrorCode{'4.0.4'} = "Deferral: Undefined Status";
+$ErrorCode{'4.0.5'} = "Deferral: Undefined Status";
+$ErrorCode{'4.0.6'} = "Deferral: Undefined Status";
+$ErrorCode{'4.0.7'} = "Deferral: Undefined Status";
+$ErrorCode{'4.0.8'} = "Deferral: Undefined Status";
+## X.1.X   Addressing Status
+$ErrorCode{'4.1.1'} = "Deferral: Bad destination mailbox address";
+$ErrorCode{'4.1.2'} = "Deferral: Bad destination system address";
+$ErrorCode{'4.1.3'} = "Deferral: Bad destination mailbox address syntax";
+$ErrorCode{'4.1.4'} = "Deferral: Destination mailbox address ambiguous";
+$ErrorCode{'4.1.5'} = "Deferral: Destination mailbox address valid";
+$ErrorCode{'4.1.6'} = "Deferral: Mailbox has moved";
+$ErrorCode{'4.1.7'} = "Deferral: Bad sender's mailbox address syntax";
+$ErrorCode{'4.1.8'} = "Deferral: Bad sender's system address";
+## X.2.X   Mailbox Status
+$ErrorCode{'4.2.0'} = "Deferral: Other or undefined mailbox status";
+$ErrorCode{'4.2.1'} = "Deferral: Mailbox disabled, not accepting messages";
+$ErrorCode{'4.2.2'} = "Deferral: Mailbox full";
+$ErrorCode{'4.2.3'} = "Deferral: Message length exceeds administrative limit";
+$ErrorCode{'4.2.4'} = "Deferral: Mailing list expansion problem";
+## X.3.X   Mail System Status
+$ErrorCode{'4.3.0'} = "Deferral: Other or undefined mail system status";
+$ErrorCode{'4.3.1'} = "Deferral: Mail system full";
+$ErrorCode{'4.3.2'} = "Deferral: System not accepting network messages";
+$ErrorCode{'4.3.3'} = "Deferral: System not capable of selected features";
+$ErrorCode{'4.3.4'} = "Deferral: Message too big for system";
+## X.4.X   Network and Routing Status
+$ErrorCode{'4.4.0'} = "Deferral: Other or undefined network or routing status";
+$ErrorCode{'4.4.1'} = "Deferral: No answer from host";
+$ErrorCode{'4.4.2'} = "Deferral: Bad connection";
+$ErrorCode{'4.4.3'} = "Deferral: Routing server failure";
+$ErrorCode{'4.4.4'} = "Deferral: Unable to route";
+$ErrorCode{'4.4.5'} = "Deferral: Network congestion";
+$ErrorCode{'4.4.6'} = "Deferral: Routing loop detected";
+$ErrorCode{'4.4.7'} = "Deferral: Delivery time expired";
+## X.5.X   Mail Delivery Protocol Status
+$ErrorCode{'4.5.0'} = "Deferral: Other or undefined protocol status";
+$ErrorCode{'4.5.1'} = "Deferral: Invalid command";
+$ErrorCode{'4.5.2'} = "Deferral: Syntax error";
+$ErrorCode{'4.5.3'} = "Deferral: Too many recipients";
+$ErrorCode{'4.5.4'} = "Deferral: Invalid command arguments";
+$ErrorCode{'4.5.5'} = "Deferral: Wrong protocol version";
+## X.6.X   Message Content or Media Status
+$ErrorCode{'4.6.0'} = "Deferral: Other or undefined media error";
+$ErrorCode{'4.6.1'} = "Deferral: Media not supported";
+$ErrorCode{'4.6.2'} = "Deferral: Conversion required and prohibited";
+$ErrorCode{'4.6.3'} = "Deferral: Conversion required but not supported";
+$ErrorCode{'4.6.4'} = "Deferral: Conversion with loss performed";
+$ErrorCode{'4.6.5'} = "Deferral: Conversion failed";
+## X.7.X   Security or Policy Status
+$ErrorCode{'4.7.0'} = "Deferral: Other or undefined security status";
+$ErrorCode{'4.7.1'} = "Deferral: Delivery not authorized, message refused";
+$ErrorCode{'4.7.2'} = "Deferral: Mailing list expansion prohibited";
+$ErrorCode{'4.7.3'} = "Deferral: Security conversion required but not possible";
+$ErrorCode{'4.7.4'} = "Deferral: Security features not supported";
+$ErrorCode{'4.7.5'} = "Deferral: Cryptographic failure";
+$ErrorCode{'4.7.6'} = "Deferral: Cryptographic algorithm not supported";
+$ErrorCode{'4.7.7'} = "Deferral: Message integrity failure";
+# Permanent Failure
+## X.0.X Other or Undefined Status
+$ErrorCode{'5.0.1'} = "Failure: Undefined Status";
+$ErrorCode{'5.0.2'} = "Failure: Undefined Status";
+$ErrorCode{'5.0.3'} = "Failure: Undefined Status";
+$ErrorCode{'5.0.4'} = "Failure: Undefined Status";
+$ErrorCode{'5.0.5'} = "Failure: Undefined Status";
+$ErrorCode{'5.0.6'} = "Failure: Undefined Status";
+$ErrorCode{'5.0.7'} = "Failure: Undefined Status";
+$ErrorCode{'5.0.8'} = "Failure: Undefined Status";
+## X.1.X   Addressing Status
+$ErrorCode{'5.1.1'} = "Failure: Bad destination mailbox address";
+$ErrorCode{'5.1.2'} = "Failure: Bad destination system address";
+$ErrorCode{'5.1.3'} = "Failure: Bad destination mailbox address syntax";
+$ErrorCode{'5.1.4'} = "Failure: Destination mailbox address ambiguous";
+$ErrorCode{'5.1.5'} = "Failure: Destination mailbox address valid";
+$ErrorCode{'5.1.6'} = "Failure: Mailbox has moved";
+$ErrorCode{'5.1.7'} = "Failure: Bad sender's mailbox address syntax";
+$ErrorCode{'5.1.8'} = "Failure: Bad sender's system address";
+## X.2.X   Mailbox Status
+$ErrorCode{'5.2.0'} = "Failure: Other or undefined mailbox status";
+$ErrorCode{'5.2.1'} = "Failure: Mailbox disabled, not accepting messages";
+$ErrorCode{'5.2.2'} = "Failure: Mailbox full";
+$ErrorCode{'5.2.3'} = "Failure: Message length exceeds administrative limit";
+$ErrorCode{'5.2.4'} = "Failure: Mailing list expansion problem";
+## X.3.X   Mail System Status
+$ErrorCode{'5.3.0'} = "Failure: Other or undefined mail system status";
+$ErrorCode{'5.3.1'} = "Failure: Mail system full";
+$ErrorCode{'5.3.2'} = "Failure: System not accepting network messages";
+$ErrorCode{'5.3.3'} = "Failure: System not capable of selected features";
+$ErrorCode{'5.3.4'} = "Failure: Message too big for system";
+## X.4.X   Network and Routing Status
+$ErrorCode{'5.4.0'} = "Failure: Other or undefined network or routing status";
+$ErrorCode{'5.4.1'} = "Failure: No answer from host";
+$ErrorCode{'5.4.2'} = "Failure: Bad connection";
+$ErrorCode{'5.4.3'} = "Failure: Routing server failure";
+$ErrorCode{'5.4.4'} = "Failure: Unable to route";
+$ErrorCode{'5.4.5'} = "Failure: Network congestion";
+$ErrorCode{'5.4.6'} = "Failure: Routing loop detected";
+$ErrorCode{'5.4.7'} = "Failure: Delivery time expired";
+## X.5.X   Mail Delivery Protocol Status
+$ErrorCode{'5.5.0'} = "Failure: Other or undefined protocol status";
+$ErrorCode{'5.5.1'} = "Failure: Invalid command";
+$ErrorCode{'5.5.2'} = "Failure: Syntax error";
+$ErrorCode{'5.5.3'} = "Failure: Too many recipients";
+$ErrorCode{'5.5.4'} = "Failure: Invalid command arguments";
+$ErrorCode{'5.5.5'} = "Failure: Wrong protocol version";
+## X.6.X   Message Content or Media Status
+$ErrorCode{'5.6.0'} = "Failure: Other or undefined media error";
+$ErrorCode{'5.6.1'} = "Failure: Media not supported";
+$ErrorCode{'5.6.2'} = "Failure: Conversion required and prohibited";
+$ErrorCode{'5.6.3'} = "Failure: Conversion required but not supported";
+$ErrorCode{'5.6.4'} = "Failure: Conversion with loss performed";
+$ErrorCode{'5.6.5'} = "Failure: Conversion failed";
+## X.7.X   Security or Policy Status
+$ErrorCode{'5.7.0'} = "Failure: Other or undefined security status";
+$ErrorCode{'5.7.1'} = "Failure: Delivery not authorized, message refused";
+$ErrorCode{'5.7.2'} = "Failure: Mailing list expansion prohibited";
+$ErrorCode{'5.7.3'} = "Failure: Security conversion required but not possible";
+$ErrorCode{'5.7.4'} = "Failure: Security features not supported";
+$ErrorCode{'5.7.5'} = "Failure: Cryptographic failure";
+$ErrorCode{'5.7.6'} = "Failure: Cryptographic algorithm not supported";
+$ErrorCode{'5.7.7'} = "Failure: Message integrity failure";
+
+while (defined($ThisLine = <STDIN>))
+{
+	if (
+			( $ThisLine =~ /new msg/ ) or
+			( $ThisLine =~ /status: / ) or
+			( $ThisLine =~ /bounce msg/ ) or
+			( $ThisLine =~ /end msg/ )
+		)
+	{
+		# We don't care about these
+	}
+	# @4000000042203bb712373f04.s:@4000000042202ab23b98282c delivery 28: deferral: Sorry,_I_wasn't_able_to_establish_an_SMTP_connection._(#4.4.1)/
+
+	elsif ( ($msgid,$DeliveryResponse,$Response) = ( $ThisLine =~ /delivery (\d+)\: (.*?)\:(.*)/ ) )
+	{
+		if ( $Response =~ /did_/ )
+		{
+			# ignore these.
+		}
+		else
+		{
+			if ( ($ResponseCode) = ( $Response =~ /Remote_host_said\:_(\d{3})_/ ) )
+			{
+				$ServerResponses->{$DeliveryResponse}->{$ResponseCode}++;
+			}
+			else
+			{
+				#if ( $DeliveryResponse =~ /failure/ )
+				if ( ( $ResponseCode) = ( $ThisLine =~ /failure:.*_vpopmail_\(#(\d\.\d\.\d)\)\// ) )
+				{
+					#$ResponseCode=511;
+					$ResponseCode =~ s/\.//g;
+					$ServerResponses->{$DeliveryResponse}->{$ResponseCode}++;
+				}
+
+				#if ( $DeliveryResponse =~ /deferral/ )
+				if ( ( $ResponseCode) = ( $ThisLine =~ /deferral:.*_\(#(\d\.\d\.\d)\)\// ) )
+				{
+					#$ResponseCode=443;
+					$ServerResponses->{$DeliveryResponse}->{$ResponseCode}++;
+				}
+			}
+		}
+	}
+	elsif ( ($EmailFrom) = ( $ThisLine =~ /from \<(.*)\>/ ) )
+	{
+		$From{$EmailFrom}++;
+	}
+	elsif ( ($ToLocal) = ( $ThisLine =~ /to local (.*)/ ) )
+	{
+		$Local{$ToLocal}++;
+	}
+	elsif ( ($ToRemote) = ( $ThisLine =~ /to remote (.*)/ ) )
+	{
+		$Remote{$ToRemote}++;
+	}
+	elsif( ($warning) = ($ThisLine =~ /warning: (.*)/ )  )
+	{
+		$Warning{$warning}++;
+	}
+	elsif ( ($triplebounce) = ($ThisLine =~ /triple bounce: discarding bounce\/(\d+)$/ ) )
+	{
+		$TripleBounce{$triplebounce}++;
+	}
+	else
+	{
+		# Report any unmatched entries...
+		push @OtherList,$ThisLine;
+	}
+}
+
+if ($QmailDetail >= 1)
+{
+	if ($QmailThreshold > 0)
+	{
+		if (($RemoteThreshold < 0) or ($RemoteThreshold eq ''))
+		{
+			$RemoteThreshold = $QmailThreshold;
+		}
+		if (($FromThreshold < 0) or ($FromThreshold eq ''))
+		{
+			$FromThreshold = $QmailThreshold;
+		}
+		if (($LocalThreshold < 0) or ($LocalThreshold eq ''))
+		{
+			$LocalThreshold = $QmailThreshold;
+		}
+	}
+
+	if (($RemoteThreshold < 0) or ($RemoteThreshold eq ''))
+	{
+		$RemoteThreshold = 0;
+	}
+	if (($FromThreshold < 0) or ($FromThreshold eq ''))
+	{
+		$FromThreshold = 0;
+	}
+	if (($LocalThreshold < 0) or ($LocalThreshold eq ''))
+	{
+		$LocalThreshold = 0;
+	}
+
+	if ( (keys %From) )
+	{
+		print "\nEmails from (Threshold of " . $FromThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$From{$b} <=> $From{$a}} keys %From)
+		{
+			if ($From{$Line} >= $FromThreshold)
+			{
+				$threshold_reached = 1;
+				print "\t" . $Line . " - ". $From{$Line} . " Time(s)\n";
+			}
+		}
+		if ($threshold_reached < 1)
+		{
+			print "\t" . "None found above the threshold ($FromThreshold)\n";
+		}
+	}
+
+	if ( (keys %Remote) )
+	{
+		print "\nEmails to Remote Server (Threshold of " . $RemoteThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$Remote{$b} <=> $Remote{$a}} keys %Remote)
+		{
+			if ($Remote{$Line} >= $RemoteThreshold)
+			{
+				$threshold_reached=1;
+				print "\t" . $Line . " - ". $Remote{$Line} . " Time(s)\n";
+			}
+		}
+		if ($threshold_reached < 1)
+		{
+			print "\t" . "None found above the threshold ($RemoteThreshold)\n";
+		}
+	}
+
+	if ( (keys %Local) )
+	{
+		print "\nEmails to Local Server (Threshold of " . $LocalThreshold . "):\n";
+		$threshold_reached=0;
+		foreach $Line (sort {$Local{$b} <=> $Local{$a}} keys %Local)
+		{
+			if ($Local{$Line} >= $LocalThreshold)
+			{
+				$threshold_reached=1;
+				print "\t" . $Line . " - ". $Local{$Line} . " Time(s)\n";
+			}
+		}
+		if ($threshold_reached < 1)
+		{
+			print "\t" . "None found above the threshold ($LocalThreshold)\n";
+		}
+	}
+}
+
+if (keys %{$ServerResponses})
+{
+	print "\nRemote Server Responses:\n";
+	foreach $Line (sort {$a cmp $b} keys %{$ServerResponses})
+	{
+		foreach $Detail (sort {$a cmp $b} keys %{$ServerResponses->{$Line}})
+		{
+			$ServerResponseTotal{$Line} += $ServerResponses->{$Line}->{$Detail};
+			$ServerResponseOverallTotal += $ServerResponses->{$Line}->{$Detail};
+			print "\t".ucfirst($Line)."(" . $Detail . ") - ". $ServerResponses->{$Line}->{$Detail} . " Time(s)";
+			if ( $SmtpCode{$Detail} )
+			{
+				print " - ".$SmtpCode{$Detail};
+			}
+			elsif ( $ErrorCode{$Detail} )
+			{
+				print " - ". $ErrorCode{$Detail};
+			}
+			print "\n";
+		}
+	}
+	print "\n\tPercentage(s):\n";
+	foreach $Details (sort {$a cmp $b} keys %ServerResponseTotal)
+	{
+		$percentage = (($ServerResponseTotal{$Details} / $ServerResponseOverallTotal) * 100);
+		print "\t\t" . ucfirst($Details) . " - ";
+		printf("%.2f",$percentage);
+		print " %\n";
+	}
+}
+
+if ( (keys %Warning) )
+{
+   print "\nWarnings:\n";
+   foreach $Line (sort {$Warning{$b} <=> $Warning{$a}} keys %Warning)
+   {
+      print "\t" . $Line . " - ". $Warning{$Line} . " Time(s)\n";
+   }
+}
+
+if ( (keys %TripleBounce) )
+{
+	$ct = 0;
+	foreach(keys %TripleBounce)
+	{
+		$ct++;
+	}
+	print "\nTripleBounces:\t";
+	print "$ct times\n";
+}
+
+if (($#OtherList >= 0) and (not $IngoreUnmatched))
+{
+	print "\n**Unmatched Entries**\n";
+	print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

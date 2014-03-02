@@ -1,0 +1,73 @@
+
+use strict;
+##########################################################################
+# $Id: autorpm,v 1.7 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+#Mon Sep 23 16:40:26 EDT 2002 - Uninstalled XXX
+#Mon Sep 23 22:13:50 EDT 2002 - XXX-1.0-1 -> XXX-1.1-2
+#Tue Sep 24 12:32:09 EDT 2002 - Installed XXX-1.0-1
+
+my (@Unmatched, $line, %Actions);
+while (defined($line = <STDIN>)) {
+   chomp($line);
+   if ($line =~ s/^Uninstalled //) {
+      $Actions{$line} = 'REMOVED';
+   } elsif ($line =~ s/^Installed //) {
+      if ($line =~ /^(.+)-([^-]+-[^-]+)$/) {
+         $Actions{$1} = $2;
+      }
+   } elsif (my ($v1, $v2) = ($line =~ /^(.+) -> (.+)$/)) {
+      if ($v2 =~ s/^.+-([^-]+-[^-]+)$/$1/) {
+         if ($v1 =~ s/^(.+)-([^-]+-[^-]+)$/$2/) {
+            $Actions{$1} = [];
+            $Actions{$1}->[0] = $v1;
+            $Actions{$1}->[1] = $v2;
+         }
+      }
+   } else {
+      push @Unmatched, $line;
+   }
+}
+
+foreach (sort keys %Actions) {
+   if ($Actions{$_} eq 'REMOVED') {
+      print "[  REMOVED] $_\n";
+   } elsif (ref $Actions{$_} eq 'ARRAY') {
+      print "[ UPGRADED] $_: $Actions{$_}->[0] -> $Actions{$_}->[1]\n";
+   } else {
+      print "[INSTALLED] $_-$Actions{$_}\n";
+   }
+}
+
+if (@Unmatched) {
+   print "Unmatched Entries:\n";
+   foreach (@Unmatched) {
+      print "   $_\n";
+   }
+}
+
+exit 0;
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

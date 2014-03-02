@@ -1,0 +1,138 @@
+##########################################################################
+# $Id: emerge,v 1.6 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+########################################################
+# This was written and is maintained by:
+#    Laurent DUFOUR <laurent.dufour@havas.com>,<dufour_l@hotmail.com>
+#    based on the work of
+#    Kirk Bauer <kirk@kaybee.org>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to laurent.dufour@havas.com
+########################################################
+
+########################################################
+## Copyright (c) 2008 Laurent DUFOUR
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+
+if ( $Debug >= 5 ) {
+   print STDERR "\n\nDEBUG: Inside EMERGE Filter \n\n";
+   $DebugCounter = 1;
+}
+
+while (defined($ThisLine = <STDIN>)) {
+   if ( $Debug >= 5 ) {
+      print STDERR "DEBUG($DebugCounter): $ThisLine";
+      $DebugCounter++;
+   }
+
+   $ThisLine =~ s/^[^ ]* [^ ]* //;
+
+ if (
+      ($ThisLine =~ /Finished. Cleaning up/) or
+      ($ThisLine =~ /exiting successfully/) or
+      ($ThisLine =~ /terminating/) or
+      ($ThisLine =~ /Compiling/) or
+      ($ThisLine =~ /=== sync/) or
+      ($ThisLine =~ /Starting rsync with/i) or
+      ($ThisLine =~ /Merging/) or
+      ($ThisLine =~ /Unmerging./) or
+      ($ThisLine =~ /Resuming merge/) or
+      ($ThisLine =~ /AUTOCLEAN/) or
+      ($ThisLine =~ />>> emerge /) or
+      ($ThisLine =~ />>> depclean/) or
+      ($ThisLine =~ /\*\*\* emerge /) or
+      ($ThisLine =~ /Cleaning/) or
+      ($ThisLine =~ /Updating world file/) or
+      ($ThisLine =~ /Post-Build/) or
+      ($ThisLine =~ /Starting retry \d+ of \d+ with/)
+    ) {
+      # Don't care about these...
+   }
+     elsif ( $ThisLine =~ s/emerge on: ([^ ]+) $2/$1 / ) {
+      $EmergeStarted++;
+   } elsif ( $ThisLine =~ s/Sync completed ([^ ]+) $2/$1 / ) {
+      $EmergeSyncCompleted{$ThisLine}++;
+   } elsif ( $ThisLine =~ s/completed emerge ([^ ]+) $2/$1 to / ) {
+      $PackageInstalled{$ThisLine}++;
+      $NumberOfPackageInstalled++;
+   } elsif ( $ThisLine =~ s/unmerge success: $2/$1 to / ) {
+      $PackageUnmerged{$ThisLine}++;
+      $NumberOfPackageUnmerged++;
+   } elsif ( $ThisLine =~ s/^Dep Installed: ([^ ]+)/$1 / ) {
+      $PackageDepInstalled{$ThisLine}++;
+   } elsif ( $ThisLine =~ /exiting unsuccessfully with status \'(\d)\'/ ) {
+      $ExitUnsuccessfull{$1}++;
+   } else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if ($EmergeStarted > 0) {
+   print "\nEmerge Started: $EmergeStarted times\n";
+}
+if (keys %EmergeSyncCompleted) {
+   print "\nEmerge Sync Completed:\n";
+   foreach $ThisOne (keys %EmergeSyncCompleted) {
+      print "   " . $ThisOne;
+   }
+}
+if (keys %PackageUnmerged) {
+   print "\nPackage Unmerged: $NumberOfPackageUnmerged times\n";
+   foreach $ThisOne (keys %PackageUnmerged) {
+      print "   " . $ThisOne;
+   }
+}
+if (keys %PackageInstalled) {
+   print "\nPackage Installed: $NumberOfPackageInstalled times\n";
+   foreach $ThisOne (keys %PackageInstalled) {
+      print "   " . $ThisOne;
+   }
+}
+if (keys %PackageDepInstalled) {
+   print "\nPackage Dependency Installed:\n";
+   foreach $ThisOne (keys %PackageDepInstalled) {
+      print "   " . $ThisOne;
+   }
+}
+if (keys %PackageUpdated) {
+   print "\nPackage Updated:\n";
+   foreach $ThisOne (keys %PackageUpdated) {
+       print "   ". $ThisOne;
+   }
+}
+if (keys %ExitUnsuccessfull) {
+   print "\nUnsuccessfull exit with:\n";
+   foreach $ThisOne (keys %ExitUnsuccessfull) {
+       print "   Status $ThisOne : $ExitUnsuccessfull{$ThisOne} Time(s)\n";
+   }
+}
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

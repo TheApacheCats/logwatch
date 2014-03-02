@@ -1,0 +1,113 @@
+What is Logwatch?
+
+Logwatch is a customizable, pluggable log-monitoring system.  It will go
+through your logs for a given period of time and make a report in the areas
+that you wish with the detail that you wish.
+
+Perl 5.8 or newer is recommended to run Logwatch. [But it will work with 5.6.1+]
+
+------------------------------------------------------------------
+
+How do I install it?
+
+An rpm file is available.  The following describes how to install if you
+prefer to install from the source tar file:
+
+The simplest setup is to follow the default configurations.
+Simply make a directory (/usr/share/logwatch) and copy the
+scripts, conf, and lib directories into that directory.
+You will also need to make the /etc/logwatch dir if you want to make
+configuration changes without having to modify the default config files.
+
+The steps to follow to get the default setup going are something like this.
+[However we recommend using the install_logwatch.sh script when possible.]
+
+Untar logwatch.
+cd logwatch-x.x
+mkdir /etc/logwatch
+mkdir /etc/logwatch/scripts
+mkdir /etc/logwatch/conf
+mkdir /etc/logwatch/conf/logfiles
+mkdir /etc/logwatch/conf/services
+touch /etc/logwatch/conf/logwatch.conf
+touch /etc/logwatch/conf/ignore.conf
+touch /etc/logwatch/conf/override.conf
+
+mkdir /usr/share/logwatch
+mkdir /usr/share/logwatch/dist.conf
+mkdir /usr/share/logwatch/dist.conf/logfiles
+mkdir /usr/share/logwatch/dist.conf/services
+
+mv conf/ /usr/share/logwatch/default.conf
+mv scripts/ /usr/share/logwatch/scripts
+mv lib /usr/share/logwatch/lib
+
+mkdir /var/cache/logwatch
+ln -s /usr/share/logwatch/scripts/logwatch.pl /etc/cron.daily/0logwatch
+ln -s /usr/share/logwatch/scripts/logwatch.pl /usr/sbin/logwatch
+
+This is only a suggestion and if you look at the logwatch.pl script and the
+logwatch.conf file you will see that you can configure the system layout in many
+different ways.
+
+See also the file HOWTO-Customize-LogWatch for more information.
+
+------------------------------------------------------------------
+
+How do I use it?
+
+Well, it should pretty much work on its own, sending you an
+email every night.  For more configuration options, run
+'logwatch --help' or edit  /usr/share/logwatch/default.conf/logwatch.conf 
+or /etc/logwatch/logwatch.conf.
+
+See the file HOWTO-Customize-LogWatch for more information.
+
+You can also use it from the command line (as documented in the
+man page).
+
+There is some documentation available in Italian here:
+   http://openskills.info/view/boxdetail.php?IDbox=656
+
+------------------------------------------------------------------
+
+If you want me to add support for a new set of log entries, please
+email me all the log entries you can from that service from as many
+machines as possible!  Or, better yet, read the HOWTO-Customize-LogWatch
+and write your own!
+
+------------------------------------------------------------------
+
+Mailing lists available!
+
+Logwatch List:
+   For general discussion and questions about Logwatch.
+   To Subscribe:  echo "subscribe" | mail logwatch-request@kaybee.org
+   Send Mail To:  logwatch@kaybee.org
+
+Logwatch Announcements List:
+   For important announcements about Logwatch.
+   To Subscribe:  echo "subscribe" | mail logwatch-announce-request@kaybee.org
+
+Logwatch Development List:
+   For discussion about Logwatch development.
+   To Subscribe:  visit https://lists.sourceforge.net/lists/listinfo/logwatch-devel
+   Send Mail To:  logwatch-devel@lists.sourceforge.net
+
+------------------------------------------------------------------
+
+Please send suggestions, bug reports, and patches to:
+logwatch-devel@lists.sourceforge.net
+
+Please ask questions at:
+logwatch@kaybee.org
+
+------------------------------------------------------------------
+
+AUTHOR CONTACT INFORMATION:
+   Kirk Bauer <kirk@kaybee.org>
+   http://www.kaybee.org/kirk/
+
+Newest releases can be found at:
+   ftp://ftp.logwatch.org/pub/redhat/RPMS
+   http://www.logwatch.org

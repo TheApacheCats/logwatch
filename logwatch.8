@@ -1,0 +1,158 @@
+.\" Process this file with
+.\" groff -man -Tascii foo.1
+.\"
+.TH LOGWATCH 8 "October 2005" Linux "User Manuals"
+.SH NAME
+logwatch \- system log analyzer and reporter
+.SH SYNOPSIS
+.B logwatch [--detail
+.I level
+.B ] [--logfile
+.I log-file-group
+.B ] [--service
+.I service-name
+.B ] [--mailto
+.I address
+.B ] [--archives] [--range
+.I range
+.B ] [--debug
+.I level
+.B ] [--filename
+.I file-name
+.B ] [--logdir
+.I directory
+.B ] [--hostname
+.I hostname
+.B ] [--hostformat 
+.I host based options
+.B ] [--output
+.I output-type
+.B ] [--format
+.I report format
+.B ] [--encode
+.I encoding to use
+.B ] [--numeric] [--version] [--help|--usage]
+.SH DESCRIPTION
+.B Logwatch
+is a customizable, pluggable log-monitoring system.  It will go
+through your logs for a given period of time and make a report in the areas
+that you wish with the detail that you wish.  Logwatch is being used for
+Linux and many types of UNIX.
+.SH OPTIONS
+.IP "\fB--detail\fR level"
+This is the detail level of the report.
+.I level
+can be a positive integer, or high, med, low, which correspond to the
+integers 10, 5, and 0, repectively.
+.IP "\fB--logfile\fR log-file-group"
+This will force Logwatch to process only the set of logfiles
+defined by
+.I log-file-group
+(i.e. messages, xferlog, ...).  Logwatch will therefore process
+all services that use those logfiles.  This option can be specified
+more than once to specify multiple logfile-groups.
+.IP "\fB--service\fR service-name"
+This will force Logwatch to process only the service specified in
+.I service-name
+(i.e. login, pam, identd, ...).  Logwatch will therefore also process
+any log-file-groups necessary to process these services.  This option
+can be specified more than once to specify multiple services to process.
+A useful
+.I service-name
+is
+.I All
+which will process all services (and logfile-groups) for which you have
+filters installed.
+.IP "\fB--mailto\fR address"
+Mail the results to the email address or user specified in
+.I address.
+This option overrides the \-\-print option.
+.IP "\fB--range\fR range"
+You can specify a date-range to process. Common ranges are  
+.I Yesterday, Today, All,
+and
+.I Help.
+Additional options are listed when invoked with the
+.I Help
+parameter.
+.IP "\fB--archives\fR"
+Each log-file-group has basic logfiles (i.e. /var/log/messages) as
+well as archives (i.e. /var/log/messages.? or /var/log/messages.?.gz).
+When used with "\-\-range all", this option will make Logwatch search
+through the archives in addition to the regular logfiles.  For other
+values of \-\-range, Logwatch will search the appropriate archived logs.
+.IP "\fB--debug\fR level"
+For debugging purposes.
+.I level
+can range from 0 to 100.  This will
+.I really
+clutter up your output.  You probably don't want to use this.
+.IP "\fB--filename\fR file-name"
+Save the output to
+.I file-name
+instead of displaying or mailing it.
+.IP "\fB--logdir\fR directory"
+Look in
+.I directory
+for log subdirectories or log files instead of the default directory.
+.IP "\fB--hostname\fR hostname"
+Use
+.I hostname
+for the reports instead of this system's hostname.  In addition,
+if HostLimit is set in the logwatch.conf configuration file (see
+\fBMORE INFORMATION\fR, below),
+then only logs from this hostname will be processed (where appropriate).
+.IP "\fB--numeric\fR"
+Inhibits additional name lookups, displaying IP addresses numerically.
+.IP "\fB--usage\fR"
+Displays usage information
+.IP "\fB--help\fR"
+same as \-\-usage.
+.SH FILES
+.IP /usr/share/logwatch/
+.RS
+This directory contains all the perl executables and
+configuration files shipped with the logwatch distribution.
+.RE
+.IP /etc/logwatch
+.RS
+This directory contains local configuration files that override
+the default configuration.  See \fBMORE INFORMATION\fR below for more
+information.
+.RE
+.SH EXAMPLES
+.B logwatch --service ftpd-xferlog --range all --detail high --print --archives
+.RS
+This will print out all FTP transfers that are stored in all current and archived
+xferlogs.
+.RE
+.B logwatch --service pam_pwdb --range yesterday --detail high --print
+.RS
+This will print out login information for the previous day...
+.RE
+.SH MORE INFORMATION
+The directory /usr/share/doc/logwatch-* contains several files with additional
+documentation:
+.RE
+.I HOWTO-Customize-LogWatch
+.RS 
+Documents the directory structure of Logwatch configuration and executable
+files, and describes how to customize Logwatch by overriding these default
+files.
+.RE
+.I LICENSE
+.RS
+Describes the License under which Logwatch is distributed.  Additional
+clauses may be specified in individual files.
+.RE
+.I README
+.RS
+Describes how to install, where to find it, mailing lists, and
+other useful information.
+.SH AUTHOR
+.RE
+Kirk Bauer <kirk@kaybee.org>
+.RE
+http://www.kaybee.org/~kirk
+.RE
+ftp://ftp.kaybee.org/pub/redhat/RPMS

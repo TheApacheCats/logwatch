@@ -1,0 +1,172 @@
+##########################################################################
+# $Id: rt314,v 1.10 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: rt314,v $
+# Revision 1.10  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.9  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.8  2007/02/16 15:05:06  bjorn
+# Deleted "Public Domain" string; now using default Logwatch license, per
+# Daniel Barrett.
+#
+#############################################################################
+# rt314: logwatcher processing script for NetGear RT314 router syslog output.
+# Author: Daniel J. Barrett, dbarrett@blazemonger.com.
+#############################################################################
+
+#######################################################
+## Copyright (c) 2008 Daniel Barrett
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Socket;
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my $separator = "-------------------------------------------------------\n";
+
+### Partition the data into types
+
+my (@portscanlines, @genlines, @otherlines, $begin, $end);
+my $psl = 0;
+my $gl = 0;
+my $ol = 0;
+while (my $line = <STDIN>) {
+   $line =~ s/netgear RAS: //;
+   unless ($begin) {
+      $begin = substr($line, 0, 15);
+   }
+   $end = $line;
+   if ( $line =~ /dpo=/ ) {
+      $portscanlines[$psl++] = $line;
+   } elsif ( $line =~ / GEN/ ) {
+      $genlines[$gl++] = $line;
+   } elsif ( $line =~ /last message repeated/ ) {
+      ;
+   } else {
+      $otherlines[$ol++] = $line;
+   }
+}
+exit(0) unless ($end);
+$end = substr($end, 0, 15);
+
+### Print summary
+if ($Detail >= 10) {
+   print "=== Summary ===\n\n";
+}
+
+print "Begin:\t$begin\n";
+print "End:\t$end\n";
+print "\n";
+
+# Extract the port number and source IP address.
+my @portarray;
+my %ipaddrs;
+foreach my $line (@portscanlines) {
+   my $portnum;
+   my $ipaddr;
+   my $dup = $line;
+
+   $dup =~ s/^.*Src=([0-9.]+) .* dpo=([0-9]*).*$/\1/;
+   $ipaddr = $1;
+   $portnum = $2;
+
+   $portarray[$portnum]++;
+   if (exists($ipaddrs{$ipaddr})) {
+      $ipaddrs{$ipaddr}++;
+   } else {
+      $ipaddrs{$ipaddr} = 1;
+   }
+}
+
+# Summarize port scans by port number
+my $total = 0;
+print "Port #\t\tScans\tService Name\n";
+print $separator;
+for (my $i = 0; $i <= $#portarray; $i++) {
+   if ( $portarray[$i] > 0 ) {
+      print "$i\t\t" . $portarray[$i] . "\t" . getservbyport($i, "tcp") . "\n";
+      $total += $portarray[$i];
+   }
+}
+print $separator;
+print "Total\t\t$total\n";
+print "\n";
+
+# Summarize port scans by initiating host
+my @keys = sort {$a <=> $b} (keys %ipaddrs);
+print "Scanned by\tScans\tHostname Lookup\n";
+print $separator;
+$total = 0;
+foreach my $ip (@keys) {
+   print "$ip\t" . $ipaddrs{$ip} . "\t" . gethostbyaddr(inet_aton($ip), AF_INET) . "\n";
+   $total += $ipaddrs{$ip};
+}
+print $separator;
+print "Total\t\t$total\n";
+print "\n";
+
+# Summarize other rule firings
+if ( $#genlines > 0 ) {
+   print "Rules fired:\t" . $#genlines . "\n";
+   print "\n";
+}
+
+# Summarize remaining output
+if ( $#otherlines > 0 ) {
+   print "Uncategorized:\t" . $#otherlines . "!!!!!!!\n";
+   print "\n";
+}
+
+if ($Detail >= 10) {
+   ## Print all data
+   print "=== Raw Data ===\n\n";
+
+   if ( $#portscanlines > 0 ) {
+      print "Port scans:\n";
+      foreach my $line (@portscanlines) {
+         print $line;
+      }
+      print "\n";
+   }
+
+   if ( $#genlines > 0 ) {
+      print "Rule lines:\n";
+      foreach my $line (@genlines) {
+         print $line;
+      }
+      print "\n";
+   }
+
+   if ( $#otherlines > 0 ) {
+      print "Other lines:\n";
+      foreach my $line (@otherlines) {
+         print $line;
+      }
+      print "\n";
+   }
+
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

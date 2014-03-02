@@ -1,0 +1,144 @@
+#############################################################################
+# $Id: dnssec,v 1.1 2005/10/19 05:57:40 bjorn Exp $
+#############################################################################
+# $Log: dnssec,v $
+# Revision 1.1  2005/10/19 05:57:40  bjorn
+# dnssec and resolver scripts, written by Lindy Foster
+#
+#############################################################################
+#Copyright (c) 2004, Sparta, Inc
+#All rights reserved.
+#
+#Redistribution and use in source and binary forms, with or without
+#modification, are permitted provided that the following conditions are met:
+#
+#*  Redistributions of source code must retain the above copyright notice,
+#   this list of conditions and the following disclaimer.
+#
+#*  Redistributions in binary form must reproduce the above copyright
+#   notice, this list of conditions and the following disclaimer in the
+#   documentation and/or other materials provided with the distribution.
+#
+#*  Neither the name of Sparta, Inc nor the names of its contributors may
+#   be used to endorse or promote products derived from this software
+#   without specific prior written permission.
+#
+#THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS ``AS
+#IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+#THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+#PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR
+#CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+#EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+#OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+#WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+#OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+#ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#############################################################################
+
+#############################################################################
+# These scripts were created as part of the dnssec-tools project.
+# For more information, see http://sourceforge.net/dnssec-tools.
+# Detailed instructions for setting up BIND 9.3.* to use these logwatch
+# configuration files and scripts are containted in the README file
+# on sourceforge.
+#############################################################################
+
+use strict;
+
+my $detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my $valFail;
+my $valOK;
+my $attPosRespVal;
+my $attNegRespVal;
+my $attInsecurityProof;
+my $insecurityProofFail;
+my $rdataFail;
+my $rdataSuccess;
+my $markingAsSecure;
+my $nonExtProof;
+my $noValidSig;
+
+while (defined(my $ThisLine = <STDIN>)) {
+   if ($ThisLine =~ /validation failed/) {
+      $valFail++;
+   } elsif ($ThisLine =~ /validation OK/) {
+      $valOK++;
+   } elsif ($ThisLine =~ /attempting positive response validation/) {
+      $attPosRespVal++;
+   } elsif ($ThisLine =~ /attempting negative response validation/) {
+      $attNegRespVal++;
+   } elsif ($ThisLine =~ /attempting insecurity proof/) {
+      $attInsecurityProof++;
+   } elsif ($ThisLine =~ /insecurity proof failed/) {
+      $insecurityProofFail++;
+   } elsif ($ThisLine =~ /verify rdataset: RRSIG failed to verify/) {
+      $rdataFail++;
+   } elsif ($ThisLine =~ /verify rdataset: success/) {
+      $rdataSuccess++;
+   } elsif ($ThisLine =~ /marking as/) {
+      $markingAsSecure++;
+   } elsif ($ThisLine =~ /nonexistence proof found/) {
+      $nonExtProof++;
+   } elsif ($ThisLine =~ /no valid signature found/) {
+      $noValidSig++;
+   }
+}
+
+if ($noValidSig > 0) {
+   print "No Valid Signature received " . $noValidSig . " time(s)\n";
+}
+
+my %msgHash = ();
+if ($detail >= 5) {
+   print "\nDetail >= 5 log messages:\n";
+   if ($markingAsSecure > 0) {
+      $msgHash{"Marking as secure"} = $markingAsSecure;
+   }
+   if ($rdataSuccess > 0) {
+      $msgHash{"Verified rdataset succeeded"} = $rdataSuccess;
+   }
+   if ($rdataFail > 0) {
+      $msgHash{"Verified rdataset failed"} = $rdataFail;
+   }
+   if ($insecurityProofFail > 0) {
+      $msgHash{"Insecurity proof failed"} = $insecurityProofFail;
+   }
+   if ($attInsecurityProof > 0) {
+      $msgHash{"Insecurity proof attempted"} = $attInsecurityProof;
+   }
+   if ($valFail > 0) {
+      $msgHash{"Validation failed"} = $valFail;
+   }
+   if ($valOK > 0) {
+      $msgHash{"Validation OK"} = $valOK;
+   }
+   if ($attPosRespVal > 0) {
+      $msgHash{"Attempted positive response validation"} = $attPosRespVal;
+   }
+   if ($attNegRespVal > 0) {
+      $msgHash{"Attempted negative response validation"} = $attNegRespVal;
+   }
+   if ($nonExtProof > 0) {
+      $msgHash{"Nonexistence proof found"} = $nonExtProof;
+   }
+
+# sort all the non-zero message types and print them in descending order
+# of number of occurrences
+
+   my $key;
+   foreach $key (sort { $msgHash{$b} <=> $msgHash{$a} } keys %msgHash) {
+      print "   " . $key . " " . $msgHash{$key} . " time(s)\n";
+   }
+}
+
+
+exit (0);
+
+# vi: shiftwidth=3 tabstop=3 et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

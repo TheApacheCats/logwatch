@@ -1,0 +1,220 @@
+##########################################################################
+# $Id: zz-disk_space,v 1.24 2008/12/08 15:16:06 mike Exp $
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$| = 1;
+
+use POSIX qw(uname);
+
+my (%Config);
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+my $logwatch_hostname = $ENV{'LOGWATCH_ONLY_HOSTNAME'};
+
+my $show_home_dir_sizes = $ENV{'show_home_dir_sizes'} || 0;
+my $home_dir = $ENV{'home_dir'} || 0;
+my $show_mail_dir_sizes = $ENV{'show_mail_dir_sizes'} || 0;
+my $mail_dir = $ENV{'mail_dir'} || 0;
+my $show_disk_usage = $ENV{'show_disk_usage'} || 0;
+my $diskfull_threshhold = $ENV{'diskfull_threshold'} || 90;
+
+my $df_options;
+my $disk_cmd;
+
+my ($OSname, $hostname, $release, $version, $machine) = POSIX::uname();
+$hostname =~ s/\..*//;
+exit (0) if ($ENV{'LOGWATCH_ONLY_HOSTNAME'} and ($logwatch_hostname ne $hostname));
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside zz-disk-space Filter \n\n";
+    $DebugCounter = 1;
+}
+
+sub DirUsage {
+    my $Dir = $_[0];
+	if ($OSname eq "Linux") {
+		system("du -s --block-size=1048576 -h $Dir | sort -n -r -k 1");
+	} elsif ($OSname eq "Darwin") {
+		system("du -s --block-size=1048576 -h $Dir | sort -n -r -k 1");
+	} elsif ($OSname eq "SunOS") {
+		if ( ($release eq "5.10") || ($release eq "5.9") || ($release eq "5.11") ) {
+			system("/usr/xpg4/bin/du -s -h $Dir | sort -n -r -k 1");
+		} else {
+			system("du -s $Dir | sort -n -r -k 1");
+  		}
+	} elsif ($OSname eq "HP-UX") {
+    	system("du -s -k $Dir | sort -n -r -k 1");
+	} elsif ($OSname eq "AIX") {
+    	system("du -s -k $Dir | sort -n -r -k 1");
+	} else {
+    	system("du -s -h $Dir | sort -n -r -k 1");
+	}
+
+}
+
+
+sub DirectorySizes
+{
+      my $Dir = $_[0];
+      DirUsage($Dir.'/*');
+}
+
+sub HomeDirectorySizes
+{
+      my $HomeDir = $_[0];
+      print "\n\n------------- Home Directory Sizes ---------------\n\n";
+      print "Size    Location\n";
+      print "(MB)\n";
+      DirectorySizes($HomeDir);
+      print "\n\n------------- Home Directory Sizes ---------------\n\n";
+}
+
+
+sub MailDirectorySizes
+{
+      my $MailDir = $_[0];
+      print "\n\n------------- Mail Directory Sizes ---------------\n\n";
+      print "Size    Location\n";
+      print "(MB)\n";
+      DirectorySizes($MailDir);
+      print "\n\n------------- Mail Directory Sizes ---------------\n\n";
+}
+
+
+sub DiskUsage ()
+{
+    my $Dir = $_[0];
+    print "\n\n------------- Directory Sizes ---------------\n\n";
+    print "Size    Location\n";
+    print "(GB)\n";
+
+	if ($OSname eq "Linux") {
+   		DirUsage("/var/log");
+   		DirUsage("/usr");
+	} elsif ($OSname eq "Darwin") {
+   		DirUsage("/var/log");
+   		DirUsage("/usr");
+	} elsif ($OSname eq "SunOS") {
+   		DirUsage("/var/log");
+   		DirUsage("/usr");
+   		DirUsage("/opt");
+	} elsif ($OSname eq "HP-UX") {
+   		DirUsage("/var/adm");
+   		DirUsage("/usr");
+   		DirUsage("/opt");
+	} else {
+   		DirUsage("/var/log");
+   		DirUsage("/usr");
+   		DirUsage("/opt");
+	}
+
+	print "\n\n------------- Directory Sizes ---------------\n\n";
+
+}
+
+sub DiskSpace ()
+{
+   if ($OSname eq "Linux") {
+      $df_options = "-h -l -x tmpfs -x udf -x iso9660";
+	} elsif ($OSname eq "Darwin") {
+      $df_options = "-h -l";
+	} elsif ($OSname eq "SunOS") {
+		if ( ($release eq "5.10") || ($release eq "5.9") || ($release eq "5.11") ) {
+         $df_options = "-h -l";
+  		} else {
+         $df_options = "-l";
+  		}
+   } elsif ($OSname eq "HP-UX") {
+      $df_options = "-l";
+   } elsif ($OSname eq "AIX") {
+      $df_options = "-P";
+   } else {
+      $df_options = "-l";
+	}
+
+   if ( $ENV{'df_options'} ) {
+      $df_options = $ENV{'df_options'};
+   };
+
+   if ($OSname eq "Linux") {
+      $disk_cmd = "df $df_options";
+	} elsif ($OSname eq "Darwin") {
+      $disk_cmd = "df $df_options";
+	} elsif ($OSname eq "SunOS") {
+      $disk_cmd = "/usr/xpg4/bin/df $df_options";
+	} elsif ($OSname eq "HP-UX") {
+      $disk_cmd = "bdf $df_options";
+	} else {
+      $disk_cmd = "df $df_options";
+	}
+
+   if ( $ENV{'disk_cmd'} ) {
+      $disk_cmd = $ENV{'disk_cmd'};
+   };
+
+   system($disk_cmd);
+
+   print "\n";
+}
+
+sub DiskFull
+{
+   my $o = `$disk_cmd`;
+   my @rows = split('\n', $o);
+   foreach my $row (@rows)
+   {
+     my @fields = split(' ', $row);
+     my $use = $fields[4];
+     $use =~ s/%//;
+     if (($use > $diskfull_threshhold) && ($fields[0] !~ /\/dev\/scd/ ) && ($fields[0] !~ /\/dev\/sr/ )
+         && ($fields[0] !~ /\/dev\/loop./))
+     {
+       print "$fields[0] => $fields[4] Used. Warning. Disk Filling up.\n";
+     }
+   }
+}
+
+#####################
+#Main
+
+#Only show disk space "df" by default -mgt
+DiskSpace() if (($ENV{PRINTING} eq 'y') or $Detail);
+
+if ( $show_disk_usage == 1 ) { DiskUsage(); }; #Turn on in zz-disk_space.conf
+
+if (($Detail > 10) || ($show_home_dir_sizes == 1)) { #set in zz-disk_space.conf -mgt
+	HomeDirectorySizes($home_dir);
+}
+
+if (($Detail > 10) || ($show_mail_dir_sizes == 1)) { #set in zz-disk_space.conf -mgt
+    MailDirectorySizes($mail_dir);
+}
+
+if ($diskfull_threshhold > 0)
+{
+  DiskFull();
+}
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

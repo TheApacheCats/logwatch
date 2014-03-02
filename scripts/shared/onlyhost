@@ -1,0 +1,62 @@
+
+use strict;
+##########################################################################
+# $Id: onlyhost,v 1.12 2008/03/24 23:31:27 kirk Exp $
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+# This feature concieved by mark@winksmith.com
+my $hostname = $ENV{'LOGWATCH_ONLY_HOSTNAME'};
+
+#Clean hostname it could be a comma list from hostlimit
+#The weakness of this next line is it could match foo.domain.com and foo.sub.domain.com
+#And it will strip IP's like 10.0.0.1 will become 10 which is not good. -mgt
+#$hostname =~ s/\.[\w\_\-]+//g;
+
+#It could be a list so reformat that
+if ($hostname =~ m/,/) {
+   $hostname =~ s/,/|/g;
+   $hostname = "($hostname)";
+}
+
+if (($ENV{'LOGWATCH_DEBUG'} > 5) and $hostname) {
+   print STDERR "DEBUG: Inside OnlyHostname for $hostname\n";
+}
+
+#If called from a service config file it passes the param as an ARG
+if (length($ARGV[0])) {      #put in or override the host id
+        $hostname = $ARGV[0];
+}
+
+my $line;
+while (defined($line = <STDIN>)) {
+   if ($hostname) {
+      if ($line =~ m/^... .. ..:..:.. $hostname\b/io) {
+         print $line;
+      }
+   } else {
+      print $line;
+   }
+}
+
+# vi: shiftwidth=3 syntax=perl tabstop=3 et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

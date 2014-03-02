@@ -1,0 +1,113 @@
+##########################################################################
+# $Id: scsi,v 1.5 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: scsi,v $
+# Revision 1.5  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.4  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.3  2005/09/27 00:52:26  mike
+# Bad patch fixed -mgt
+#
+# Revision 1.2  2005/09/26 17:34:05  mike
+# Patch from David Baldwin for better error handling -mgt
+#
+# Revision 1.1  2005/05/21 23:11:51  bjorn
+# Submitted by Benjamin Baudoux.
+#
+# Revision 1.1  2005/05/21 22:58:23  bjorn
+# Submitted by Benjamin Baudoux.
+#
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Benjamin Baudoux
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+########################################################
+# This was written and is maintained by:
+#    cadtool@stepmind.com
+#
+# Heavily based on sshd script
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to logwatch-devel@lists.sourceforge.net
+########################################################
+
+use strict;
+use Logwatch ':all';
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+my $DebugCounter = 0;
+my $Diskwarning = 0;
+my %ListDiskWarning = ();
+my @OtherList = ();
+
+if ( $Debug >= 5 ) {
+         print STDERR "\n\nDEBUG: Inside SCSI Filter \n\n";
+         $DebugCounter = 1;
+}
+
+while (defined(my $ThisLine = <STDIN>)) {
+
+    if ( $Debug >= 5 ) {
+       print STDERR "DEBUG($DebugCounter): $ThisLine";
+       $DebugCounter++;
+    }
+    chomp($ThisLine);
+    if ( 0 or
+        ($ThisLine =~ m/target/)    # startup
+    ) {
+       # Ignore these
+    } elsif ( ($ThisLine =~ m/WARNING:/) or
+              ($ThisLine =~ m/Requested Block:/) or
+              ($ThisLine =~ m/Sense Key:/) or
+              ($ThisLine =~ m/Vendor:/) or
+              ($ThisLine =~ m/ASC:/)
+    ) {
+       $ListDiskWarning{$ThisLine} += 1;
+       if ( $ThisLine =~ m/WARNING:/ )
+       {
+         $Diskwarning++;
+       }
+    } else {
+       # Report any unmatched entries...
+       push @OtherList, "$ThisLine\n";
+    }
+}
+
+###########################################################
+
+if ($Diskwarning) {
+    print "\nYou may have R/W errors on your device " . $Diskwarning . " Time(s)\n";
+    print "$_: $ListDiskWarning{$_} time(s)\n" foreach keys %ListDiskWarning;
+}
+
+
+if ($#OtherList >= 0) {
+    print "\n**Unmatched Entries**\n";
+    print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

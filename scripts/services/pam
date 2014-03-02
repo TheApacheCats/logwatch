@@ -1,0 +1,57 @@
+
+##########################################################################
+# $Id: pam,v 1.11 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+#####################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+    if ( ( $ThisLine =~ /^pam_get_user: no username obtained$/ ) or
+         ( $ThisLine =~ /^pam_end: NULL pam handle passed/ ) ) {
+        # We don't care about these
+    }
+    elsif ( $ThisLine =~ s/^FAILED LOGIN SESSION FROM ([^ ]+) FOR .*$/$1/ ) {
+        $FailedLogins{$ThisLine}++;
+    }
+    else {
+        # Report any unmatched entries...
+        push @OtherList,$ThisLine;
+    }
+}
+
+if ( (keys %FailedLogins) and ($Detail >= 10) ) {
+   print "\nFailed Login Sessions:\n";
+   foreach $ThisOne (keys %FailedLogins) {
+      print "   " . $FailedLogins{$ThisOne} . " from " . $ThisOne;
+   }
+}
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

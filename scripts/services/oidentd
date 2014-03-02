@@ -1,0 +1,166 @@
+
+##########################################################################
+# $Id: oidentd,v 1.7 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: oidentd,v $
+# Revision 1.7  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.6  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.5  2005/02/24 17:08:05  kirk
+# Applying consolidated patches from Mike Tremaine
+#
+# Revision 1.4  2005/02/16 00:43:28  mgt
+# Added #vi tag to everything, updated ignore.conf with comments, added emerge and netopia to the tree from Laurent -mgt
+#
+# Revision 1.3  2004/07/29 19:33:29  mgt
+# Chmod and removed perl call -mgt
+#
+# Revision 1.2  2004/07/10 01:54:35  mgt
+# sync with kirk -mgt
+#
+# Revision 1.2  2004/06/21 14:59:05  kirk
+# Added tons of patches from Pawe? Go?aszewski" <blues@ds.pg.gda.pl>
+#
+# Thanks, as always!
+#
+# Revision 1.1  2004/02/03 02:45:26  kirk
+# Tons of patches, and new 'oidentd' and 'shaperd' filters from
+# Pawe? Go?aszewski" <blues@ds.pg.gda.pl>
+#
+# Revision 1.2  2004/01/27 09:20:58  blues
+# - updated some missing entries
+#
+# Revision 1.1  2004/01/23 20:47:20  blues
+# - basic support for oidentd. It's full support for me, but I know that
+#   something is missing. If you have some unmatched entries - send to me.
+#
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Pawe³ Go³aszewski <blues@pld-linux.org>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to kirk@kaybee.org and blues@pld-linux.org
+########################################################
+
+#####################################################
+## Copyright (c) 2008 Pawe³ Go³aszewski
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+## Initial initialization:
+$Startups = 0;
+$Shutdowns = 0;
+$LookupCount = 0;
+$LookupErrorCount = 0;
+$Connections = 0;
+$MasqLookupCount = 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   if (
+      ($ThisLine =~ m/^Continuous traffic control enabled/) or
+      ($ThisLine =~ m/^Timeout for request -- Closing connection/)
+   ) {
+      #ignore these
+   } elsif ( ($Host,$Port,$User,$Identity) = ($ThisLine =~ /^\[([^ ]*)\] Successful lookup: \d+ , (\d+) : ([^ ]*) \(([^ ]*)\)$/)) {
+      $Temp = "$User announced as $Identity";
+      $Lookups{$Port}{$Temp}{$Host}++;
+      $LookupCount++;
+   } elsif ( ($Host,$Port,$User) = ($ThisLine =~ /^\[([^ ]*)\] \(Masqueraded\) Successful lookup: \d+ , (\d+) : ([^ ]*)$/)) {
+      $Temp = "Masqueraded as $User";
+      $Lookups{$Port}{$Temp}{$Host}++;
+      $LookupCount++;
+      $MasqLookupCount++;
+   } elsif (
+      (($Host) = ($ThisLine =~ /^Connection from ([^ ]* \([^ ]*\)):\d+$/)) or
+      (($Host) = ($ThisLine =~ /^Connection from ([^ ]*):\d+$/))
+      ) {
+      $Connection{$Host}++;
+      $Connections++;
+   } elsif ( ($Host,$Port) = ($ThisLine =~ /^\[([^ ]*)\] \d+ , (\d+) : ERROR : [^ ]*$/)) {
+      $ErrorLookup{$Port}{$Host}++;
+      $LookupErrorCount++;
+   } elsif ( $ThisLine =~ /^oidentd startup\s+succeeded$/ ) {
+      $Startups++;
+   } elsif ( $ThisLine =~ /^oidentd shutdown\s+succeeded$/ ) {
+      $Shutdowns++;
+   } else {
+      $OtherList{$ThisLine}++;
+   }
+}
+
+###########################
+# Print report:
+
+if ($Startups > 0) {
+   print "\nStartups: $Startups\n";
+}
+
+if ($Shutdowns > 0) {
+   print "\nShutdowns: $Shutdowns\n";
+}
+
+if (keys %Connection) {
+   print "\nConnections to service: $Connections Time(s)\n";
+   foreach $Host (sort {$a cmp $b} keys %Connection) {
+      print "   $Host: $Connection{$Host} Time(s)\n";
+   }
+}
+
+if (keys %Lookups) {
+   print "\nSuccessful ident lookups $LookupCount Time(s)\n";
+   if ($MasqLookupCount > 0) {
+      print "Masqueraded connections: $MasqLookupCount Time(s)\n";
+   }
+   foreach $Port (sort {$a cmp $b} keys %Lookups) {
+      print "    Service on port $Port:\n";
+      foreach $User (sort {$a cmp $b} keys %{$Lookups{$Port}}) {
+         print "      $User:\n";
+         foreach $Host (sort {$a cmp $b} keys %{$Lookups{$Port}{$User}}) {
+            print "         $Host: $Lookups{$Port}{$User}{$Host} Time(s)\n";
+         }
+      }
+   }
+}
+
+if (keys %ErrorLookup) {
+   print "\nErrors when lookup ident $LookupErrorCount Time(s)\n";
+   foreach $Port (sort {$a cmp $b} keys %ErrorLookup) {
+      print "    Service on port $Port:\n";
+      foreach $Host (sort {$a cmp $b} keys %{$ErrorLookup{$Port}}) {
+         print "      $Host: $ErrorLookup{$Port}{$Host} Time(s)\n"
+      }
+   }
+}
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $line (sort {$a cmp $b} keys %OtherList) {
+      print "$line: $OtherList{$line} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

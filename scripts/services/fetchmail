@@ -1,0 +1,115 @@
+##########################################################################
+# $Id: fetchmail $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Oron Peled <oron \@\ actcom.net.il>
+#
+########################################################
+
+########################################################
+## Copyright (c) 2010 Oron Peled
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my %no_mail;
+my %messages_for;
+my %auth_fail;
+my %conn_fail;
+
+#Inits
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   $ThisLine =~ s/^[a-zA-Z0-9]+: //;
+   if($ThisLine =~ s/^No mail for (\S+) at (\S+)//) {
+      $no_mail{"${1} at ${2}"}++;
+   } elsif($ThisLine =~ /^reading message /) {
+      # ignore
+   } elsif($ThisLine =~ s/^Query status=[23]//) {
+      # ignore. Counted below (Authorization, Connection)
+   } elsif($ThisLine =~ s/^Authorization failure on (\S+)//) {
+      $auth_fail{"${1}"}++;
+   } elsif($ThisLine =~ s/^\S+ connection to \S+ failed: .*//) {
+      # ignore. Counted below
+   } elsif($ThisLine =~ s/^connection to (\S+) \[[^]]+\] failed: (.*).//) {
+      $conn_fail{"${1} -- ${2}"}++;
+   } elsif($ThisLine =~ s/^(\d+) messages? for (\S+) at (\S+).*.//) {
+      $messages_for{"${2} at ${3}"} += $1;
+   } else {
+      chomp($ThisLine);
+      # Report any unmatched entries...
+      $OtherList{$ThisLine}++;
+   }
+}
+
+if (keys %messages_for) {
+   my $total;
+   print "\nMessages\n";
+   foreach my $who (sort keys %messages_for) {
+      print "   $who: $messages_for{$who}\n";
+      $total += $messages_for{$who};
+   }
+   print "   Total: $total\n";
+}
+
+if (keys %conn_fail) {
+   my $total;
+   print "\nConnection failures\n";
+   foreach my $who (sort keys %conn_fail) {
+      print "   $who: $conn_fail{$who} Time(s)\n";
+      $total += $conn_fail{$who};
+   }
+   print "   Total: $total\n";
+}
+
+if (keys %auth_fail) {
+   my $total;
+   print "\nAuthorization failures\n";
+   foreach my $who (sort keys %auth_fail) {
+      print "   $who: $auth_fail{$who} Time(s)\n";
+      $total += $auth_fail{$who};
+   }
+   print "   Total: $total\n";
+}
+
+if (keys %no_mail) {
+   my $total;
+   print "\nNo Mail\n";
+   foreach my $who (sort keys %no_mail) {
+      print "   $who: $no_mail{$who} Time(s)\n";
+      $total += $no_mail{$who};
+   }
+   print "   Total: $total\n";
+}
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $line (sort {$OtherList{$b}<=>$OtherList{$a} } keys %OtherList) {
+      print "   $line: $OtherList{$line} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

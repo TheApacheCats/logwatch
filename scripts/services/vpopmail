@@ -1,0 +1,102 @@
+##########################################################################
+# $Id: vpopmail,v 1.13 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# Written & Maintained by Chris Smith (csmith@squiz.net)
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Chris Smith
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+$IgnoreUnmatched = $ENV{'vpopmail_ignore_unmatched'} || 0;
+
+$ShowSuccessfulLogins = $ENV{'successful_logins'};
+
+while (defined($ThisLine = <STDIN>)) {
+   if (
+		( $ThisLine =~	/vpop_mail/ )
+      ) {
+      # We don't care about these
+   } elsif (($VirtAccount) = ($ThisLine =~ /no virt found (.*?)\:/i )) {
+      $NoAccount{$VirtAccount}++;
+	} elsif (($Account,$IP) = ($ThisLine =~ /login success (.*?)\:(.*)/i	)) {
+		$Type = 'Plain';
+		$SuccessfulLogin->{$Account}->{$Type}->{$IP}++;
+	} elsif (($Type,$Account,$IP) = ($ThisLine =~ /\((.*?)\) login success (.*?)\:(.*)/i	)) {
+		$SuccessfulLogin->{$Account}->{$Type}->{$IP}++;
+   } elsif (($ThisLine =~ /bounce msg/)) {
+      $Bounce++;
+   } elsif (($Email) = ($ThisLine =~ /password fail (.*?)\:/i )) {
+      $PasswordFail{$Email}++;
+   } elsif ((undef, $NoUser) = ($ThisLine =~ /(no user found|user not found) (.*?)\:/i )) {
+      $NoUserFound{$NoUser}++;
+   } else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if ($ShowSuccessfulLogins) {
+	if (keys %{$SuccessfulLogin}) {
+		print "\nSuccessful Logins:\n";
+		foreach	$Line (sort {$a cmp $b} keys %{$SuccessfulLogin}) {
+			foreach $Type (sort {$a cmp $b} keys %{$SuccessfulLogin->{$Line}}) {
+				foreach $Detail (sort {$a cmp $b} keys %{$SuccessfulLogin->{$Line}->{$Type}}) {
+					print "\t".$Line." ( from " . $Detail . " using " . $Type . " ) - " . $SuccessfulLogin->{$Line}->{$Type}->{$Detail} . " Time(s)\n";
+				}
+			}
+		}
+	}
+}
+
+if ( (keys %PasswordFail) ) {
+   print "\nPassword Failures:\n";
+   foreach $Line (sort {$a cmp $b} keys %PasswordFail) {
+      print "\t" . $Line . " - ". $PasswordFail{$Line} . " Time(s)\n";
+   }
+}
+
+if ( (keys %NoAccount) ) {
+   print "\nNo Account Found:\n";
+   foreach $Line (sort {$a cmp $b} keys %NoAccount) {
+      print "\t" . $Line . " - ". $NoAccount{$Line} . " Time(s)\n";
+   }
+}
+
+if ( (keys %NoUserFound) ) {
+   print "\nNo Such User Found:\n";
+   foreach $Line (sort {$a cmp $b} keys %NoUserFound) {
+      print "\t" . $Line . " - ". $NoUserFound{$Line} . " Time(s)\n";
+   }
+}
+
+if ($Bounce) {
+   print "\nBounced messages: ". $Bounce."\n";
+}
+
+if (($#OtherList >= 0) and (not $IgnoreUnmatched)){
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

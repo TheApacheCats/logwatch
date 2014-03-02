@@ -1,0 +1,1247 @@
+##########################################################################
+# $Id: postfix,v 1.44 2010/09/19 16:40:00 stefan Exp $
+##########################################################################
+
+#####################################################
+## Copyright (c) 2008 Sven Conrad
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+#
+# $Log: postfix,v $
+# Revision 1.44  2010/09/19 16:40:00  stefan
+# fix: pix workaround in postfix >v2.3, (thanks kabe)
+# add: improper Pipeling (thanks kabe)
+#
+# Revision 1.43  2010/05/15 15:45:36  stefan
+# fix: fatal: open database <db>: No such file or directory
+#
+# Revision 1.42  2010/05/05 11:42:53  stefan
+# fix: ignore reload
+#
+# Revision 1.41  2008/08/11 15:33:53  mike
+# Lost connection patch from Peter Johnson -mgt
+#
+# Revision 1.40  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.39  2008/05/25 01:16:22  mike
+# Reverting to version before the major rewrite -mgt
+#
+# Revision 1.28  2006/12/15 06:24:49  bjorn
+# Filtering "sender non-delivery notification", by Ivana Varekova.
+#
+# Revision 1.27  2006/12/15 05:00:41  bjorn
+# Filter all held message logs, by Hugo van der Kooij.
+#
+# Revision 1.26  2006/10/20 16:51:50  bjorn
+# Additional matching of sasl messages, by Willi Mann.
+#
+# Revision 1.25  2006/08/13 21:25:55  bjorn
+# Updates to work with the Postfix 2.3.x series (due to log format changes),
+# by Mike Cappella.
+#
+# Revision 1.24  2006/03/22 17:43:46  bjorn
+# Changes by Harald Geiger:
+# - ignore additional statistics: messages (Postfix 2.2)
+# - replaced several 5xx Codes by [0-9]+
+#   (main reason is to make them match on 4xx if in soft_bounce=yes mode)
+# - a more generic "Client host rejected" reporting
+# - changed "Messages rejected:" to "Messages rejected from sender:"
+#
+# Revision 1.23  2005/12/19 15:47:47  bjorn
+# Updates from Mike Cappella:
+#   - Catches some of the Unknown Users messages from newer versions of postfix
+#   - Consolidates a couple of REs
+#   - Adds a cumulative total to each of the Unknown users and Header content rejection headers
+#   - Adds a Body content rejection section
+#
+# Revision 1.22  2005/11/22 18:30:47  bjorn
+# Detecting 'virtual alias table', by Kevin Old.
+#
+# Revision 1.21  2005/08/23 23:54:38  mike
+# Fixed typo propably from Roland Hermans -mgt
+#
+# Revision 1.20  2005/07/25 22:26:28  bjorn
+# Added "Sender address" to "554 Service unavailable" regexp, by Who Knows
+#
+# Revision 1.19  2005/04/22 13:48:28  bjorn
+# This patch catches (un)deliverable messages and many more, which were
+# missing until now on mu new postfix-2.1.*, from Paweł Gołaszewski
+#
+# Revision 1.18  2005/04/17 23:12:28  bjorn
+# Patches from Peter Bieringer and Willi Mann: ignoring more lines and
+# some blank spaces
+#
+# Revision 1.17  2005/02/24 17:08:05  kirk
+# Applying consolidated patches from Mike Tremaine
+#
+# Revision 1.7  2005/02/16 00:43:28  mgt
+# Added #vi tag to everything, updated ignore.conf with comments, added emerge and netopia to the tree from Laurent -mgt
+#
+# Revision 1.6  2005/02/13 23:50:42  mgt
+# Tons of patches from Pawel and PLD Linux folks...Thanks! -mgt
+#
+# Revision 1.5  2004/10/06 21:42:53  mgt
+# patches from Pawel quien-sabe -mgt
+#
+# Revision 1.4  2004/07/29 19:33:29  mgt
+# Chmod and removed perl call -mgt
+#
+# Revision 1.3  2004/07/10 01:54:35  mgt
+# sync with kirk -mgt
+#
+# Revision 1.13  2004/06/23 15:01:17  kirk
+# - Added more patches from blues@ds.pg.gda.pl
+#
+# Revision 1.12  2004/06/21 14:59:05  kirk
+# Added tons of patches from Pawe? Go?aszewski" <blues@ds.pg.gda.pl>
+#
+# Thanks, as always!
+#
+# Revision 1.11  2004/06/21 13:42:02  kirk
+# From: Matthew Wise <matt@oatsystems.com>
+# This is more of a suggestion than a true patch submission. On a busy
+# postfix server the messages sent by section is really long and not
+# helpful. This patch finds and lists the top 10 senders by bumber of
+# messages.
+#
+# Revision 1.10  2004/06/21 13:41:04  kirk
+# Patch from rod@nayfield.com
+#
+# Revision 1.9.1 2004/02/22 16:44:01 rod
+# Added patch from rod@nayfield.com
+#
+# Revision 1.9  2004/02/03 03:25:02  kirk
+# Added patch from quien-sabe@metaorg.com
+#
+# Revision 1.8  2004/02/03 02:45:26  kirk
+# Tons of patches, and new 'oidentd' and 'shaperd' filters from
+# Pawe? Go?aszewski" <blues@ds.pg.gda.pl>
+#
+# Revision 1.7  2003/12/15 18:35:03  kirk
+# Tons of patches from blues@ds.pg.gda.pl
+#
+# Revision 1.6  2003/12/15 18:09:23  kirk
+# Added standard vi formatting commands at the bottom of all files.
+# Applied many patches from blues@ds.pg.gda.pl
+#
+# Revision 1.5  2003/12/15 17:45:09  kirk
+# Added clamAV update log filter from lars@spinn.dk
+#
+# Revision 1.4  2003/11/26 14:36:30  kirk
+# Applied patch from blues@ds.pg.gda.pl
+#
+# Revision 1.3  2003/11/18 14:04:05  kirk
+# More patches from blues@ds.pg.gda.pl
+#
+# Revision 1.2  2003/11/18 04:02:21  kirk
+# Patch from blues@ds.pg.gda.pl
+#
+# Revision 1.1  2003/11/03 04:49:18  kirk
+# Added postfix filter from Sven Conrad <sconrad@receptec.net>
+#
+# Revision 1.1  2002/03/29 15:32:14  kirk
+# Added some filters found in RH's release
+#
+#
+# Revision ???  2000/07/12 Simon Liddington <sjl@zepler.org>
+# converted from sendmail to postfix Sven Conrad <scon@gmx.net>
+# added unknown users
+# added relay denials
+# todo:
+# add authentication warnings
+# add forward errors
+# add returns after 4 hours
+# ignores alias database building
+# ignores daemon start messages
+# ignores clone messages
+# ignores all to= lines whatever follows stat=
+#
+#
+# Revision 1.1  2003/03/21 21:10  sven
+# Initial revision
+#
+# filters all postfix/<process> messages
+#
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    ??? Kenneth Porter <shiva@well.com> ???
+#    changed by Sven Conrad <scon@gmx.net>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to ?? shiva@well.com.??
+#    Sven Conrad <scon@gmx.net>
+#
+########################################################
+
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+
+my $re_DSN     = '(?:\d{3}(?: \d\.\d\.\d)?)';
+my $re_MsgID   = '[a-zA-Z\d]+';
+
+$MsgsQueue              = 0;
+$BytesTransferred       = 0;
+$FourHourReturns        = 0;
+$ReturnedToSender       = 0;
+$ResentMessages         = 0;
+$RemovedFromQueue       = 0;
+$UnsupportedFamily      = 0;
+$TableChanged           = 0;
+$QueueSizeExceeded      = 0;
+$RejectedRBL            = 0;
+$ErrorRBL               = 0;
+$NoFreeSpace            = 0;
+$RejectClients          = 0;
+$RejectUnknownClients   = 0;
+$Undeliverable          = 0;
+$Deliverable            = 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   if (
+      ( $ThisLine =~ m/^$re_MsgID: client=([^ ]*\[[^ ]*\])\s*$/ ) or
+      ( $ThisLine =~ m/^$re_MsgID: message-id/ ) or
+      ( $ThisLine =~ m/^$re_MsgID: skipped, still being delivered/ ) or
+      ( $ThisLine =~ m/^$re_MsgID: to=\<.*>, relay=.*, delay=[\d.]+,(?: delays=[\d\/.]+, dsn=[\d.]+,)? status=(?:sent|deferred)/ ) or
+      ( $ThisLine =~ m/^$re_MsgID: host [^ ]*\[[^ ]*\] said: 4[0-9][0-9]/ ) or
+      ( $ThisLine =~ m/^$re_MsgID: host [^ ]*\[[^ ]*\] refused to talk to me: 4[0-9][0-9]/ ) or
+      ( $ThisLine =~ m/^$re_MsgID: sender non-delivery notification: $re_MsgID/ ) or
+      ( $ThisLine =~ m/^Deleted: \d message$/ ) or
+      ( $ThisLine =~ m/^Peer certficate could not be verified$/ ) or #postfix typo
+      ( $ThisLine =~ m/^Peer certificate could not be verified$/ ) or
+      ( $ThisLine =~ m/^Peer verification:/ ) or
+      ( $ThisLine =~ m/^SSL_accept error from/ ) or
+      ( $ThisLine =~ m/^Verified: / ) or
+      ( $ThisLine =~ m/^cert has expired/ ) or
+      ( $ThisLine =~ m/^connect/ ) or
+      ( $ThisLine =~ m/^daemon started$/ ) or
+      ( $ThisLine =~ m/^daemon started -- version / ) or
+      ( $ThisLine =~ m/^dict_eval_action:/ ) or
+      ( $ThisLine =~ m/^disconnect/ ) or
+      ( $ThisLine =~ m/^mynetworks:/ ) or
+      ( $ThisLine =~ m/^name_mask:/ ) or
+      ( $ThisLine =~ m/^reload(?: -- version [\d.]+,)? configuration/ ) or
+      ( $ThisLine =~ m/^setting up TLS connection (from|to)/ ) or
+      ( $ThisLine =~ m/^starting TLS engine$/ ) or
+      ( $ThisLine =~ m/^terminating on signal 15$/ ) or
+      ( $ThisLine =~ m/^warning: $re_MsgID: skipping further client input$/ ) or
+      ( $ThisLine =~ m/^warning: (?:smtpd_peer_init: )?[\.0-9]+: address not listed for hostname/ ) or
+      ( $ThisLine =~ m/^warning: (?:smtpd_peer_init: )?[\.0-9]+: hostname .* verification failed: Host not found/ ) or
+      ( $ThisLine =~ m/^warning: (?:smtpd_peer_init: )?[\.0-9]+: hostname .* verification failed: Name or service not known/ ) or
+      ( $ThisLine =~ m/^warning: (?:smtpd_peer_init: )?[\.0-9]+: hostname .* verification failed: Temporary failure in name resolution/ ) or
+      ( $ThisLine =~ m/^warning: Mail system is down -- accessing queue directly$/ ) or
+      ( $ThisLine =~ m/^warning: SASL authentication failure: Password verification failed$/ ) or
+      ( $ThisLine =~ m/^warning: SASL authentication failure: no secret in database$/ ) or
+      ( $ThisLine =~ m/^warning: no MX host for .* has a valid A record$/ ) or
+      ( $ThisLine =~ m/^warning: numeric domain name in resource data of MX record for .*$/ ) or
+      ( $ThisLine =~ m/^warning: premature end-of-input from cleanup socket while reading input attribute name$/ ) or
+      ( $ThisLine =~ m/^warning: uid=\d: Broken pipe$/ ) or
+      ( $ThisLine =~ m/^verify error:num=/ ) or
+      ( $ThisLine =~ m/hold: header / )
+      or ( $ThisLine =~ m/^statistics: max / )
+      or ( $ThisLine =~ m/^statistics: start interval / )
+      or ( $ThisLine =~ m/^statistics: (address|domain) lookup / )
+      or ( $ThisLine =~ m/: replace: header / )
+      or ( $ThisLine =~ m/: Greylisted for / )                           # Greylisting has it's own statistics tool
+      or ( $ThisLine =~ m/certificate verification failed for/o )        # Perhaps a candidate for extended statistics
+      or ( $ThisLine =~ m/Server certificate could not be verified/o )   # Perhaps a candidate for extended statistics
+      or ( $ThisLine =~ m/certificate peer name verification failed/o )  # Perhaps a candidate for extended statistics
+      or ( $ThisLine =~ m/sender non-delivery notification:/o ) 	 # Perhaps a candidate for extended statistics
+   ) {
+      # We don't care about these
+   } elsif ( ($Bytes) = ($ThisLine =~ /^$re_MsgID: from=[^,]+, size=(\d+), .*$/o) ) {
+	#fixme count
+      $MsgsQueue++;
+      $BytesTransferred += $Bytes;
+   } elsif (($User) = ($ThisLine =~ /^$re_MsgID: to=\<([^ ]*)>,(?: orig_to=\<(?:[^ ]*)>,)? relay=local, delay=-?\d+, status=bounced \((?:unknown user|user unknown)/)) {
+      # unknown user
+      $UnknownUsers{$User}++;
+   } elsif (($User) = ($ThisLine =~ /^$re_MsgID: reject: RCPT from (?:[^ ]*): $re_DSN <([^ ]*)>:(?:[^:]+: )?User unknown in(?: \w+)+ table/)) {
+      # unknown local mailbox, alias, virtual user
+      $UnknownUsers{$User}++;
+   } elsif (($User) = ($ThisLine =~ /^$re_MsgID: to=\<([^ ]*)>,(?: orig_to=\<(?:[^ ]*)>,)? .*, status=bounced .*: User unknown in virtual (alias|mailbox) table/)) {
+      # another unknown user probably could combine with local unknown but again my perl is weak
+      $UnknownUsers{$User}++;
+   } elsif (($Dest, $Relay, $Msg) = ($ThisLine =~ /^$re_MsgID: to=\<([^ ]*)>,(?: orig_to=\<(?:[^ ]*)>,)? relay=([^ ]*).*, delay=-?[\d.]+(?:, delays=[\d\/.]+, dsn=[\d.]+)?, status=bounced \(([^)]*)/ )) {
+      # unknown user
+      # $Msg = " hello "
+      # print "bounce message from " . $Dest . " msg : " . $Relay . "\n";
+      if ($Relay =~ m/^(none|local|avcheck|127\.0\.0\.1)/) {
+         $Temp = "To " . $Dest . " Msg=\"" . $Msg . "\"";
+         $LocalBounce{$Temp}++;
+      } else {
+         $Temp = "To " . $Dest . " Msg=\"" . $Msg . "\"";
+         $ForeignBounce{$Temp}++;
+      }
+   } elsif ( ($Relay,$Dest) = ($ThisLine =~ m/reject: RCPT from ([^ ]*): $re_DSN <([^ ]*)>.* Relay access denied.* to=([^ ]*)/) ) {
+      # print "reject: " . $ThisLine . "\n";
+      # print "Relay :" . $Relay . " to " . $Dest . "\n";
+      $Temp = "From " . $Relay . " to " . $Dest;
+      $RelayDenied{$Temp}++;
+   } elsif ( ($User,$From) = ($ThisLine =~ /^$re_MsgID: uid=([^ ]*) from=\<([^ ]*)>/)) {
+      #Messages sent by user
+      $Temp = $From . " (uid=" . $User . "): ";
+      $SentBy{$Temp}++;
+   } elsif ( ($From) = ($ThisLine =~ /^$re_MsgID: from=<([^ ]*)>, status=expired, returned to sender$/)) {
+      $ReturnedToSender++;
+   } elsif ( (undef) = ($ThisLine =~ /^$re_MsgID: resent-message-id=<([^ ]*)>$/)) {
+      $ResentMessages++;
+   } elsif (
+         ($Command,$Host) = ($ThisLine =~ /lost connection after (.*) from ([^ ]*)$/) or
+         ($Host,$Command) = ($ThisLine =~ /^$re_MsgID: lost connection with ([^ ]*) while (.*)$/)
+      ) {
+      # Make some better summary with hosts
+      $ConnectionLost{$Command}++;
+   } elsif (
+         ($Command,$Host) = ($ThisLine =~ /timeout after (.*) from ([^ ]*)$/) or
+         ($Host,$Command) = ($ThisLine =~ /^$re_MsgID: conversation with ([^ ]*) timed out while (.*)$/)
+      ) {
+      # Make some better summary with hosts
+      $ConnectionLost{$Command}++;
+   } elsif ( ($Rejected,undef,undef,undef,$Reason) = ($ThisLine =~ /^$re_MsgID: reject: header (.*); from=<([^ ]*)> to=<([^ ]*)>( proto=[^ ]* helo=<[^ ]*>)?: (.*)$/)) {
+      $HeaderReject{$Reason}{$Rejected}++;
+   } elsif ( ($Warning,undef,undef,undef,$Reason) = ($ThisLine =~ /^$re_MsgID: warning: header (.*); from=<([^ ]*)> to=<([^ ]*)>( proto=[^ ]* helo=<[^ ]*>)?: (.*)$/)) {
+      $HeaderWarning{$Reason}{$Warning}++;
+   } elsif ( ($Warning,undef,undef,undef) = ($ThisLine =~ /^$re_MsgID: warning: header (.*); from=<([^ ]*)> to=<([^ ]*)>( proto=[^ ]* helo=<[^ ]*>)?$/)) {
+      $HeaderWarning{"Unknown Reason"}{$Warning}++;
+   } elsif ( ($Rejected,undef,undef,undef,$Reason) = ($ThisLine =~ /^$re_MsgID: reject: body (.*); from=<([^ ]*)> to=<([^ ]*)>( proto=[^ ]* helo=<[^ ]*>)?: (.*)$/)) {
+      $BodyReject{$Reason}{$Rejected}++;
+   } elsif ( (undef,undef,undef,$Reason) = ($ThisLine =~ /^$re_MsgID: to=<([^ ]*)>,( orig_to=<[^ ]*>,)? relay=([^ ]*), delay=\d+, status=undeliverable \((.*)\)$/)) {
+      $Undeliverable++;
+      $UndeliverableMsg{$Reason}++;
+   } elsif ( (undef,undef,undef,undef) = ($ThisLine =~ /^$re_MsgID: to=<([^ ]*)>,( orig_to=<[^ ]*>,)? relay=([^ ]*), delay=\d+, status=deliverable \((.*)\)$/)) {
+      $Deliverable++;
+   } elsif ( ($Host,$Sender,$Reason) = ($ThisLine =~ /reject: RCPT from ([^ ]*\[[^ ]*\]): $re_DSN <(.*)>: Sender address rejected: (.*);/)) {
+      $RejectSender{$Reason}{$Host}{$Sender}++;
+      $RejectSenderHost{$Reason}{$Host}++;
+      $RejectSenderReason{$Reason}++;
+   } elsif ( ($Host,$Reason,$Sender,$Recip) = ($ThisLine =~ /reject: RCPT from ([^ ]*\[[^ ]*\]): $re_DSN <[^ ]*\[[^ ]*\]>: Client host rejected: (.*); from=<(.*)> to=<(.*)> proto=/)) {
+      $RejectClient{$Reason}{$Host}{$Sender}{$Recip}++;
+      $RejectClientHost{$Reason}{$Host}++;
+      $RejectClientReason{$Reason}++;
+   } elsif ( ($Host,$Sender,$Recip,$Helo) = ($ThisLine =~ /reject: RCPT from [^ ]*\[([^ ]*)\]: $re_DSN Client host rejected: cannot find your hostname, \[\d+\.\d+\.\d+\.\d+\]; from=<(.*?)> to=<(.*?)> proto=\S+ helo=<(.*)>/)) {
+      $RejectUnknownClient{$Host}{$Helo}{$Sender}{$Recip}++;
+      $RejectUnknownClientHost{"$Host	helo=<$Helo>"}++;
+      $RejectUnknownClients++;
+   } elsif ( ($Host,$Recip,$Reason) = ($ThisLine =~ /reject: RCPT from ([^ ]*\[[^ ]*\]): $re_DSN <(.*)>: Recipient address rejected: (.*);/)) {
+      $Temp = "$Host : $Reason";
+      $RejectRecip{$Recip}{$Temp}++;
+   } elsif ( ($Host,undef) = ($ThisLine =~ /reject: RCPT from ([^ ]*\[[^ ]*\]): $re_DSN <(.*)>: Sender address rejected: Access denied;/)) {
+      $RejectAddress{$Host}++;
+   } elsif ( ($Host,$Site,$Reason) = ($ThisLine =~ /reject: RCPT from ([^ ]*\[[^ ]*\]): $re_DSN Service unavailable; (?:Client host )?\[[^ ]*\] blocked using ([^ ]*), reason: (.*);/)) {
+      $Temp = "$Host : $Reason";
+      $RejectRBL{$Site}{$Temp}++;
+      $RejectedRBL++;
+   } elsif ( ($Host,$Site) = ($ThisLine =~ /reject: RCPT from ([^ ]*\[[^ ]*\]): $re_DSN Service unavailable; (?:Sender address |Client host )?\[[^ ]*\] blocked using ([^ ]*);/)) {
+      $RejectRBL{$Site}{$Host}++;
+      $RejectedRBL++;
+   } elsif ( ($Host,$Site,$Reason) = ($ThisLine =~ /warning: ([^ ]*): RBL lookup error: Name service error for \d+\.\d+\.\d+\.\d+\.([^ ]*): (.*)$/)) {
+      $Temp = "$Host : $Reason";
+      $RBLError{$Site}{$Temp}++;
+      $ErrorRBL++;
+   } elsif ( ($Host,$Site,$Reason) = ($ThisLine =~ /discard: RCPT from ([^ ]*\[[^ ]*\]): ([^ ]*): ([^;]*);/)) {
+      $Discarded{$Site}{$Reason}++;
+   } elsif ( (undef,undef,$Error) = ($ThisLine =~ /warning: ([^ ]*): hostname ([^ ]*) verification failed: (.*)$/)) {
+      $HostnameVerification{$Error}++;
+   } elsif ( $ThisLine =~ /^$re_MsgID: removed\s*$/) {
+      $RemovedFromQueue++;
+   #TD 2F38EE3341: enabling PIX <CRLF>.<CRLF> workaround for host.name[111.222.333.444]
+   #TD 2A34C1123BC4: enabling PIX workarounds: disable_esmtp delay_dotcrlf for host.name[111.222.333.444]:25
+   } elsif ( ($Host) = ($ThisLine =~ /^$re_MsgID: enabling PIX (?:<CRLF>\.<CRLF> )?workaround(?:s: [a-z_, -]+)? for ([^ ]*\[[^ ]*\])(?::\d+)?$/)) {
+      $PixWorkaround{$Host}++;
+   } elsif ( ($Message) = ($ThisLine =~ /warning: valid_hostname: (.*)$/)) {
+      $ValidHostname{$Message}++;
+   } elsif ( ($Host,$Error) = ($ThisLine =~ /warning: host ([^ ]*\[[^ ]*\]) (greeted me with my own hostname [^ ]*)$/)) {
+      $HeloError{$Error}{$Host}++;
+   } elsif ( ($Host,$Error) = ($ThisLine =~ /warning: host ([^ ]*\[[^ ]*\]) (replied to HELO\/EHLO with my own hostname [^ ]*)$/)) {
+      $HeloError{$Error}{$Host}++;
+   } elsif ( ($Host,$Error) = ($ThisLine =~ /reject: RCPT from ([^ ]*\[[^ ]*\]): $re_DSN <.*>: (Helo command rejected: .*);/)) {
+      $HeloError{$Error}{$Host}++;
+   } elsif ( ($Error,$Host) = ($ThisLine =~ /(bad size limit "\([^ ]*\)" in EHLO reply) from ([^ ]*\[[^ ]*\])$/)) {
+      $HeloError{$Error}{$Host}++;
+   } elsif ( ($Host,$Command) = ($ThisLine =~ /warning: Illegal address syntax from ([^ ]*\[[^ ]*\]) in ([^ ]*) command:/)) {
+      $IllegalAddressSyntax{$Command}{$Host}++;
+   } elsif ( ($Command,$Host) = ($ThisLine =~ /^improper command pipelining after ([^ ]*) from ([^ ]*\[[^ ]*\])/ )) {
+      $UnauthPipeline{$Command}{$Host}++;
+   } elsif ( ($Error) = ($ThisLine =~ /warning: mailer loop: (.*)$/)) {
+      $MailerLoop{$Error}++;
+   } elsif ( ($Host) = ($ThisLine =~ /warning: ([^ ]*\[[^ ]*\]): SASL .* authentication failed/)) {
+      $SaslAuthenticationFail{$Host}++;
+   } elsif (
+         ($Host,$User) = ($ThisLine =~ /^$re_MsgID: client=([^ ]*\[[^ ]*\]), .* sasl_username=([^ ]*)$/) or
+         ($Host,$User) = ($ThisLine =~ /^$re_MsgID: client=([^ ]*\[[^ ]*\]), sasl_sender=([^ ]*)$/) or
+         ($Host,$User) = ($ThisLine =~ /^$re_MsgID: client=([^ ]*\[[^ ]*\]), .* sasl_username=([^ ]*), sasl_sender=[^ ]*$/)
+      ) {
+      chomp($User);
+      $SaslAuth{$Host}{$User}++;
+   } elsif ( ($Host) = ($ThisLine =~ /TLS connection established from ([^ ]*\[[^ ]*\]):/)) {
+      $TLSconnectFrom{$Host}++;
+   } elsif ( ($Host) = ($ThisLine =~ /TLS connection established to ([^ ]*):/)) {
+      $TLSconnectTo{$Host}++;
+   } elsif ( ($Cert) = ($ThisLine =~ /^Unverified: (.*)/)) {
+      $TLSunverified{$Cert}++;
+   } elsif ( ($Domain) = ($ThisLine =~ /warning: malformed domain name in resource data of MX record (.*)$/)) {
+      $MxError{$Domain}++;
+   } elsif ( ($Host,$Command) = ($ThisLine =~ /warning: ([^ ]*\[[^ ]*\]) sent .* header instead of ([^ ]*) command: /)) {
+      $Error = "Sent message header instead of $Command command";
+      $SmtpConversationError{$Error}{$Host}++;
+   } elsif (
+         ($ThisLine =~ m/warning: smtp_connect_addr: socket: Address family not supported by protocol/) or
+         ($ThisLine =~ m/warning: smtp_addr_one: unknown address family \d for [^ ]*/)
+      ) {
+      $UnsupportedFamily++;
+   } elsif (
+         ($ThisLine =~ m/(lookup |)table has changed -- exiting$/) or
+         ($ThisLine =~ m/table ([^ ]*) has changed -- restarting$/)
+      ) {
+      $TableChanged++;
+   } elsif (
+         ($ThisLine =~ m/^fatal: [^ ]*\(\d+\): Message file too big$/) or
+         ($ThisLine =~ m/^warning: $re_MsgID: queue file size limit exceeded$/) or
+         ($ThisLine =~ m/^warning: uid=\d+: File too large$/)
+      ) {
+      $QueueSizeExceeded++;
+   } elsif ( ($Command,$Host) = ($ThisLine =~ /too many errors after ([^ ]*) from ([^ ]*\[[^ ]*\])$/)) {
+      $TooManyErrors{$Command}{$Host}++;
+   } elsif ( (undef,undef,$To) = ($ThisLine =~ /^reject: RCPT from ([^ ]*\[[^ ]*\]): 552 Message size exceeds fixed limit; from=<([^ ]*)> to=<([^ ]*)>$/)) {
+      $SizeLimit{"$From -> $To"}++;
+   } elsif ( ($Server) = ($ThisLine =~ /^NOQUEUE: reject: MAIL from ([^ ]*\[[^ ]*\]): 552 Message size exceeds fixed limit; proto=[^ ]* helo=<[^ ]*>$/)) {
+      $SizeLimit{"MAIL from $Server"}++;
+   } elsif ( (undef,$Source) = ($ThisLine =~ /^warning: database ([^ ]*) is older than source file ([\w\/.-]+)$/)) {
+      $DatabaseGeneration{$Source}++;
+   } elsif ( ($Reason) = ($ThisLine =~ /^warning: $re_MsgID: write queue file: (.*)$/)) {
+      $QueueWriteError{$Reason}++;
+   } elsif ( ($Reason) = ($ThisLine =~ /^warning: open active $re_MsgID: (.*)$/)) {
+      $QueueWriteError{"open active: $Reason"}++;
+   } elsif ( ($Reason) = ($ThisLine =~ /^warning: qmgr_active_corrupt: save corrupt file queue active id $re_MsgID: (.*)$/)) {
+      $QueueWriteError{"active corrupt: $Reason"}++;
+   } elsif ( ($Reason) = ($ThisLine =~ /^warning: qmgr_active_done_3_generic: remove $re_MsgID: (.*)$/)) {
+      $QueueWriteError{"remove active: $Reason"}++;
+   } elsif ( ($Reason) = ($ThisLine =~ /^warning: [^ ]*\/$re_MsgID: (Error writing message file)$/)) {
+      $MessageWriteError{$Reason}++;
+   } elsif ( $ThisLine =~ /reject: RCPT from [^ ]*\[[^ ]*\]: \d+ Insufficient system storage; from=<.*> to=<.*>/) {
+      $NoFreeSpace++;
+   } elsif ( ($Process,$Status) = ($ThisLine =~ /^warning: process ([^ ]*) pid \d+ exit status (\d+)$/)) {
+      $ProcessExit{$Status}{$Process}++;
+   } elsif ( ($Option,$Reason) = ($ThisLine =~ /^fatal: config variable ([^ ]*): (.*)$/)) {
+      $ConfigError{$Option}{$Reason}++;
+   } elsif ( ($db,$Reason) = ($ThisLine =~ /fatal: open database (\S*): (.*)/) ) {
+      $Databases{$db}{$Reason}++;
+   } elsif ( ($Warn) = ($ThisLine =~ /^warning: (.*)/)) {
+      # keep this as the next to last condition
+      $UnknownWarnings{$Warn}++;
+   } else {
+      push @OtherList,$ThisLine;
+   }
+}
+
+##################################################################
+
+#CRITICAL WARNINGS
+if ($NoFreeSpace > 0) {
+   print "\nWARNING!!!\n";
+   print "Insufficient system storage error $NoFreeSpace Time(s)\n";
+}
+
+#STATS
+if ($MsgsQueue > 0) {
+   print "STATISTICS\n";
+   print "----------\n";
+   print "\n$BytesTransferred bytes transferred";
+   print "\n$MsgsQueue messages accepted for queue";
+}
+
+if ($FourHourReturns > 0) {
+   print "\n$FourHourReturns messages returned after 4 hours";
+}
+
+if ($Deliverable > 0) {
+   print "\n$Deliverable messages accepted as deliverable";
+}
+
+if ($Undeliverable > 0) {
+   print "\n$Undeliverable messages rejected as undeliverable";
+}
+
+if ($ReturnedToSender >0) {
+   print "\n$ReturnedToSender messages expired and returned to sender";
+}
+
+if ($ResentMessages > 0) {
+   print "\n$ResentMessages resent messages";
+}
+
+if ($RemovedFromQueue > 0) {
+   print "\n$RemovedFromQueue messages removed from queue";
+}
+
+if ($QueueSizeExceeded > 0) {
+   print "\n$QueueSizeExceeded messages exceeded queue or message file size limit and removed";
+}
+
+if ($TableChanged > 0) {
+   print "\n$TableChanged exited after table change detection";
+}
+
+if ($UnsupportedFamily > 0) {
+   print "\nUnknown address family $UnsupportedFamily Time(s)\n";
+}
+
+#DETAILS
+if ($MsgsQueue > 0) {
+   print "\n\nDETAILS\n";
+   print "_______\n";
+}
+
+if (keys %ConfigError or keys %Databases) {
+   print "\n\nFATAL!!!\n";
+   print "Configuration Errors:\n";
+   foreach $Option (sort {$a cmp $b} keys %ConfigError) {
+      print "   Option: $Option\n";
+      foreach $Reason (sort {$a cmp $b} keys %{$ConfigError{$Option}} ) {
+         print "      $Reason: $ConfigError{$Option}{$Reason} Time(s)\n";
+      }
+   }
+   foreach $db (sort {$a cmp $b} keys %Databases) {
+      print "   Database: $db\n";
+      foreach $Reason (sort {$a cmp $b} keys %{$Databases{$db}} ) {
+         print "      $Reason: $Databases{$db}{$Reason} Time(s)\n";
+      }
+   }
+}
+
+if (keys %QueueWriteError) {
+   if ($Detail >= 5) {
+      print "\n\nError writing queue file:\n";
+      foreach $Reason (sort {$a cmp $b} keys %QueueWriteError) {
+         print "   $Reason : $QueueWriteError{$Reason} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      foreach $Reason (keys %QueueWriteError) {
+         $n+=$QueueWriteError{$Reason};
+      }
+      print "\n\nError writing queue file: $n Time(s)";
+   }
+}
+
+if (keys %MessageWriteError) {
+   if ($Detail >= 5) {
+      print "\n\nError writing message file:\n";
+      foreach $Reason (sort {$a cmp $b} keys %MessageWriteError) {
+         print "   $Reason : $MessageWriteError{$Reason} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      foreach $Reason (keys %MessageWriteError) {
+         $n+=$MessageWriteError{$Reason};
+      }
+      print "\n\nError writing message file: $n Time(s)";
+   }
+}
+
+if (keys %DatabaseGeneration) {
+   if ($Detail >= 5) {
+      print "\n\nDatabase files are not up-to-date (probably rehash is needed):\n";
+      foreach $Source (sort {$a cmp $b} keys %DatabaseGeneration) {
+         print "   $Source : $DatabaseGeneration{$Source} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $fn=scalar(keys %DatabaseGeneration);
+      foreach $Source (keys %DatabaseGeneration) {
+         $n+=$DatabaseGeneration{$Source};
+      }
+      print "\n\nDatabase files are not up-to-date (probably rehash is needed): $fn File(s), $n Time(s)";
+   }
+}
+
+if (keys %PixWorkaround) {
+   if ($Detail >= 5) {
+      print "\n\nEnabled PIX workarounds for:\n";
+      foreach $Host (sort {$a cmp $b} keys %PixWorkaround) {
+         print "   $Host : $PixWorkaround{$Host} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $hn=scalar(keys %PixWorkaround);
+      foreach $Host (keys %PixWorkaround) {
+         $n+=$PixWorkaround{$Host};
+      }
+      print "\n\nEnabled PIX workarounds for: $hn Host(s), $n Time(s)";
+   }
+}
+
+if (($Detail >=5) and (keys %SentBy)) {
+   print "\n\nTop ten local senders:\n";
+   foreach $ThisSender (sort {$a cmp $b} keys %SentBy) {
+      $ThisNumber = $SentBy{$ThisSender};
+      push(@{$ThisIsNumber{$ThisNumber}}, $ThisSender);
+   }
+   my $ListRank = 10;
+   foreach $SenderRank (sort {$b <=> $a} keys %ThisIsNumber) {
+      last unless ($ListRank > 0);
+      print "   $SenderRank messages sent by:\n";
+      foreach $ThisSender (@{$ThisIsNumber{$SenderRank}}) {
+         last unless ($ListRank > 0);
+         $ListRank--;
+         print"      $ThisSender\n";
+      }
+   }
+}
+
+if (keys %UnknownUsers) {
+   $un=scalar(keys %UnknownUsers);
+   if ($Detail >= 10) {
+      print "\n\nUnknown users: $un Time(s)\n";
+      foreach $ThisOne (sort {$a cmp $b} keys %UnknownUsers) {
+         print "   $ThisOne : $UnknownUsers{$ThisOne} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      foreach $ThisOne (keys %UnknownUsers) {
+         $n+=$UnknownUsers{$ThisOne};
+      }
+      print "\n\nUnknown users: $un, $n Time(s)";
+   }
+}
+
+if (keys %SaslAuthenticationFail) {
+   if ($Detail >= 5) {
+      print "\n\nSASL Authentication failed from:\n";
+      foreach $Host (sort {$a cmp $b} keys %SaslAuthenticationFail) {
+         print "   $Host : $SaslAuthenticationFail{$Host} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $hn=scalar(keys %SaslAuthenticationFail);
+      foreach $Host (keys %SaslAuthenticationFail) {
+         $n+=$SaslAuthenticationFail{$Host};
+      }
+      print "\n\nSASL Authentication failed from: $hn Host(s), $n Time(s)";
+   }
+}
+
+if (keys %SaslAuth) {
+   if ($Detail >= 5) {
+      print "\n\nSASL Authenticated messages from:\n";
+      foreach $Host (sort {$a cmp $b} keys %SaslAuth) {
+         if ($Detail >= 10) {
+            print "    $Host:\n";
+            foreach $User (sort {$a cmp $b} keys %{$SaslAuth{$Host}} ) {
+               print "        sasluser $User : $SaslAuth{$Host}{$User} Times(s)\n";
+            }
+         }
+         else {
+            $n=0;
+            foreach $User (keys %{$SaslAuth{$Host}} ) {
+               $n+=$SaslAuth{$Host}{$User};
+            }
+            print "    $Host: $n Time(s)\n";
+         }
+      }
+   }
+   else {
+      $n=0;
+      $hn=scalar(keys %SaslAuth);
+      foreach $Host (keys %SaslAuth) {
+         foreach $User (keys %{$SaslAuth{$Host}} ) {
+            $n+=$SaslAuth{$Host}{$User};
+         }
+      }
+      print "\n\nSASL Authenticated messages from: $hn Host(s), $n Time(s)";
+   }
+}
+
+if (keys %TLSconnectFrom) {
+   if ($Detail >= 5) {
+      print "\n\nTLS Connections from:\n";
+      foreach $Host (sort {$a cmp $b} keys %TLSconnectFrom) {
+         print "   $Host : $TLSconnectFrom{$Host} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $hn=scalar(keys %TLSconnectFrom);
+      foreach $Host (keys %TLSconnectFrom) {
+         $n+=$TLSconnectFrom{$Host};
+      }
+      print "\n\nTLS Connections from: $hn Host(s), $n Time(s)";
+   }
+}
+
+if (keys %TLSconnectTo) {
+   if ($Detail >= 5) {
+      print "\n\nTLS Connections to:\n";
+      foreach $Host (sort {$a cmp $b} keys %TLSconnectTo) {
+         print "   $Host : $TLSconnectTo{$Host} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $hn=scalar(keys %TLSconnectTo);
+      foreach $Host (keys %TLSconnectTo) {
+         $n=$TLSconnectTo{$Host};
+      }
+      print "\n\nTLS Connections to: $hn Host(s), $n Time(s)";
+   }
+}
+
+if (keys %TLSunverified) {
+   if ($Detail >= 5) {
+      print "\n\nUnverified TLS certificates:\n";
+      foreach $Cert (sort {$a cmp $b} keys %TLSunverified) {
+         print "   $Cert : $TLSunverified{$Cert} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $cn=scalar(keys %TLSunverified);
+      foreach $Cert (keys %TLSunverified) {
+         $n+=$TLSunverified{$Cert};
+      }
+      print "\n\nUnverified TLS certificates: $cn, $n Time(s)";
+   }
+}
+
+if (keys %RelayDenied) {
+   if ($Detail >= 5) {
+      print "\n\nRelaying denied:\n";
+      foreach $ThisOne (sort {$a cmp $b} keys %RelayDenied) {
+         print "   $ThisOne : $RelayDenied{$ThisOne} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      foreach $ThisOne (keys %RelayDenied) {
+         $n+=$RelayDenied{$ThisOne};
+      }
+      print "\n\nRelaying denied: $n Time(s)";
+   }
+}
+
+if (keys %SizeLimit) {
+   if ($Detail >= 5) {
+      print "\n\nMessage size exceeds fixed limit:\n";
+      foreach $Message (sort {$a cmp $b} keys %SizeLimit) {
+         print "   $Message: $SizeLimit{$Message} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $mn=scalar(keys %SizeLimit);
+      foreach $Message (keys %SizeLimit) {
+         $n+=$SizeLimit{$Message};
+      }
+      print "\n\nMessage size exceeds fixed limit: $mn Message(s), $n Time(s)";
+   }
+}
+
+if (keys %LocalBounce) {
+   if ($Detail >= 5) {
+      print "\n\nLocal Bounce:\n";
+      foreach $ThisOne (sort {$a cmp $b} keys %LocalBounce) {
+         print "   $ThisOne : $LocalBounce{$ThisOne} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $bn=scalar(keys %LocalBounce);
+      foreach $ThisOne (keys %LocalBounce) {
+         $n+=$LocalBounce{$ThisOne};
+      }
+      print "\n\nLocal Bounces: $bn, $n Time(s)";
+   }
+}
+
+if (keys %ForeignBounce) {
+   if ($Detail >= 5) {
+      print "\n\nForeign Bounce:\n";
+      foreach $ThisOne (sort {$a cmp $b} keys %ForeignBounce) {
+         print "   $ThisOne : $ForeignBounce{$ThisOne} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $bn=scalar(keys %ForeignBounce);
+      foreach $ThisOne (keys %ForeignBounce) {
+         $n+=$ForeignBounce{$ThisOne};
+      }
+      print "\n\nForeign Bounce: $bn, $n Time(s)";
+   }
+}
+
+if (keys %HeaderReject) {
+   if ($Detail >= 10) {
+      print "\n\nHeader content reject:\n";
+      foreach $Reason (sort {$a cmp $b} keys %HeaderReject) {
+         print "   $Reason: ", scalar keys %{$HeaderReject{$Reason}} , " Time(s)\n";
+         foreach $Rejected (sort {$a cmp $b} keys %{$HeaderReject{$Reason}} ) {
+            print "      $Rejected : $HeaderReject{$Reason}{$Rejected} Time(s)\n";
+         }
+      }
+   }
+   else {
+      $n=0;
+      $rn=scalar(keys %HeaderReject);
+      foreach $Reason (keys %HeaderReject) {
+         foreach $Rejected (keys %{$HeaderReject{$Reason}} ) {
+            $n+=$HeaderReject{$Reason}{$Rejected};
+         }
+      }
+      print "\n\nHeader content rejected: $rn Reason(s), $n Time(s)";
+   }
+}
+
+if (keys %HeaderWarning) {
+   if ($Detail >= 10) {
+      print "\n\nHeader content warning (but passed):\n";
+      foreach $Reason (sort {$a cmp $b} keys %HeaderWarning) {
+         print "   $Reason:";
+         foreach $Warning (sort {$a cmp $b} keys %{$HeaderWarning{$Reason}} ) {
+            print "      $Warning : $HeaderWarning{$Reason}{$Warning} Time(s)\n";
+         }
+      }
+   }
+   else {
+      $n=0;
+      $rn=scalar(keys %HeaderWarning);
+      foreach $Reason (keys %HeaderWarning) {
+         foreach $Warning (keys %{$HeaderWarning{$Reason}} ) {
+            $n+=$HeaderWarning{$Reason}{$Warning};
+         }
+      }
+      print "\n\nHeader content warning (but passed): $rn Reason(s), $n Time(s)";
+   }
+}
+
+if (keys %BodyReject) {
+   if ($Detail >= 10) {
+      print "\n\nBody content reject:\n";
+      foreach $Reason (sort {$a cmp $b} keys %BodyReject) {
+         print "   $Reason: ", scalar keys %{$BodyReject{$Reason}} , " Time(s)\n";
+         foreach $Rejected (sort {$a cmp $b} keys %{$BodyReject{$Reason}} ) {
+            print "      $Rejected : $BodyReject{$Reason}{$Rejected} Time(s)\n";
+         }
+      }
+   }
+   else {
+      $n=0;
+      $rn=scalar(keys %BodyReject);
+      foreach $Reason (keys %BodyReject) {
+         foreach $Rejected (keys %{$BodyReject{$Reason}} ) {
+            $n+=$BodyReject{$Reason}{$Rejected};
+         }
+      }
+      print "\n\nBody content rejected: $rn Reason(s), $n Time(s)";
+   }
+}
+
+if (keys %RejectClient) {
+   print "\n\nClient hosts rejected:\n";
+   foreach $Reason (sort {$a cmp $b} keys %RejectClient) {
+      if ($Detail >= 5) {
+         print "    $Reason $RejectClientReason{$Reason} Time(s)\n";
+         foreach $Host (sort {$a cmp $b} keys %{$RejectClient{$Reason}} ) {
+            print "        $Host $RejectClientHost{$Reason}{$Host} Time(s)\n";
+            if ($Detail >= 10) {
+               foreach $Sender (sort {$a cmp $b} keys %{$RejectClient{$Reason}{$Host}}) {
+                  foreach $Recip (sort {$a cmp $b} keys %{$RejectClient{$Reason}{$Host}{$Sender}}) {
+                     print "            $Sender -> $Recip $RejectClient{$Reason}{$Host}{$Sender}{$Recip} Time(s)\n";
+                  }
+               }
+            }
+         }
+      }
+      else {
+         $n=0;
+         $hn=scalar(keys %{$RejectClient{$Reason}});
+         print "    $Reason: $hn Host(s), $RejectClientReason{$Reason} Time(s)\n";
+      }
+   }
+}
+
+if ($RejectUnknownClients > 0) {
+   if ($Detail >= 10) {
+      print "\n\nUnknown client hosts rejected $RejectUnknownClients Time(s)\n";
+      foreach $Host (sort {$a cmp $b} keys %RejectUnknownClient) {
+         print "   $Host\n";
+	 foreach $Helo (sort {$a cmp $b} keys %{$RejectUnknownClient{$Host}}) {
+	    print "	helo=<$Helo>\n";
+               foreach $Sender (sort {$a cmp $b} keys %{$RejectUnknownClient{$Host}{$Helo}}) {
+                  foreach $Recip (sort {$a cmp $b} keys %{$RejectUnknownClient{$Host}{$Helo}{$Sender}}) {
+                     print "		$Sender -> $Recip	$RejectUnknownClient{$Host}{$Helo}{$Sender}{$Recip} Time(s)\n";
+	       }
+            }
+	 }
+      }
+   }
+   elsif ($Detail >= 5) {
+      print "\n\nUnknown client hosts rejected $RejectUnknownClients Time(s)\n";
+      foreach $Host (sort {$a cmp $b} keys %RejectUnknownClientHost) {
+         print "   $Host	$RejectUnknownClientHost{$Host} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      foreach $Host (keys %RejectUnknownClientHost) {
+         $n++;
+      }
+      print "\n\nUnknown client hosts rejected $RejectUnknownClients Time(s): $n Host(s)";
+   }
+}
+
+if (($Detail >= 10) and (keys %UndeliverableMsg)) {
+   print "\n\nUndeliverable messages rejected:\n";
+   foreach $Reason (sort {$a cmp $b} keys %UndeliverableMsg) {
+      print "   $Reason: $UndeliverableMsg{$Reason} Time(s)\n";
+   }
+}
+
+if (keys %RejectSender) {
+   print "\n\nMessages rejected from sender:\n";
+   foreach $Reason (sort {$a cmp $b} keys %RejectSender) {
+      if ($Detail >= 5) {
+         print "    $Reason $RejectSenderReason{$Reason} Time(s)\n";
+         foreach $Host (sort {$a cmp $b} keys %{$RejectSender{$Reason}} ) {
+            print "        $Host $RejectSenderHost{$Reason}{$Host} Time(s)\n";
+            if ($Detail >= 10) {
+               foreach $Sender (sort {$a cmp $b} keys %{$RejectSender{$Reason}{$Host}}) {
+                  print "           $Sender : $RejectSender{$Reason}{$Host}{$Sender} Time(s)\n";
+               }
+            }
+         }
+      }
+      else {
+         $n=0;
+         $hn=scalar(keys %{$RejectSender{$Reason}});
+         print "    $Reason: $hn Host(s), $RejectSenderReason{$Reason} Time(s)\n";
+      }
+   }
+}
+
+if (keys %RejectRecip) {
+   if ($Detail >= 5) {
+      print "\n\nMessages rejected to recipient:\n";
+      foreach $Recip (sort {$a cmp $b} keys %RejectRecip) {
+         print "    $Recip:\n";
+         foreach $Host (sort {$a cmp $b} keys %{$RejectRecip{$Recip}} ) {
+            print "        $Host : $RejectRecip{$Recip}{$Host} Time(s)\n";
+         }
+      }
+   }
+   else {
+      $n=0;
+      $rn=scalar(keys %RejectRecip);
+      foreach $Recip (keys %RejectRecip) {
+         foreach $Host (keys %{$RejectRecip{$Recip}} ) {
+            $n+=$RejectRecip{$Recip}{$Host};
+         }
+      }
+      print "\n\nMessages rejected to: $rn Recipient(s), $n Time(s)";
+   }
+}
+
+if (keys %RejectAddress) {
+   if ($Detail >= 5) {
+      print "\n\nRejected sender address from:\n";
+      foreach $Host (sort {$a cmp $b} keys %RejectAddress) {
+         print "   $Host : $RejectAddress{$Host} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $hn=scalar(keys %RejectAddress);
+      foreach $Host (keys %RejectAddress) {
+         $n+=$RejectAddress{$Host};
+      }
+      print "\n\nRejected sender address from: $hn Host(s), $n Time(s)";
+   }
+}
+
+if (keys %RejectRBL) {
+   print "\n\nMessages rejected using Anti-Spam site $RejectedRBL Time(s)\n";
+   foreach $Site (sort {$a cmp $b} keys %RejectRBL) {
+      $count = 0;
+      # okay there is probably a more efficient way to get this total
+      # than walking the container again, but my perl is weak
+      # and I want to know which list are working the best so I can
+      # put them at the top of the checking order in my configuration
+      foreach $Host ( keys %{$RejectRBL{$Site}} ) {
+         $count = $count + $RejectRBL{$Site}{$Host};
+      }
+      if ($Detail >= 5) {
+         print "    $Site identified $count spam messages:\n";
+         foreach $Host (sort {$a cmp $b} keys %{$RejectRBL{$Site}} ) {
+            print "      $Host : $RejectRBL{$Site}{$Host} Time(s)\n";
+         }
+      }
+      else {
+         print "    $Site identified $count spam messages.\n";
+      }
+   }
+}
+
+if (keys %RBLError) {
+   if ($Detail >= 5) {
+      print "\n\nRBL lookup errors $ErrorRBL Time(s)\n";
+      foreach $Site (sort {$a cmp $b} keys %RBLError) {
+         print "   $Site\n";
+         if ($Detail >= 10) {
+            foreach $Error (sort {$a cmp $b} keys %{$RBLError{$Site}} ) {
+               print "      $Error : $RBLError{$Site}{$Error} Time(s)\n";
+            }
+         }
+      }
+   }
+   else {
+      $n=0;
+      $hn=scalar(keys %RBLError);
+      print "\n\nRBL lookup errors for $hn Host(s), $ErrorRBL Time(s)";
+   }
+}
+
+if (keys %Discarded) {
+   if ($Detail >= 5) {
+      print "\n\nDiscarded messages:\n";
+      foreach $Recipient (sort {$a cmp $b} keys %Discarded) {
+         print "   $Recipient\n";
+         foreach $Reason (sort {$a cmp $b} keys %{$Discarded{$Recipient}} ) {
+            print "      $Reason : $Discarded{$Recipient}{$Reason} Time(s)\n";
+         }
+      }
+   }
+   else {
+      $n=0;
+      $rn=scalar(keys %Discarded);
+      foreach $Recipient (keys %Discarded) {
+         foreach $Reason (keys %{$Discarded{$Recipient}} ) {
+            $n+=$Discarded{$Recipient}{$Reason};
+         }
+      }
+      print "\n\nDiscarded messages to: $rn Recipient(s), $n Time(s)";
+   }
+}
+
+if (keys %AuthWarns) {
+   print "\n\nAuthentication warnings:\n";
+   foreach $ThisOne (sort {$a cmp $b} keys %AuthWarns) {
+      print "   $ThisOne : $AuthWarns{$ThisOne} Time(s)\n";
+   }
+}
+
+if (keys %ForwardErrors) {
+   print "\n\nForwarding errors:\n";
+   foreach $ThisOne (sort {$a cmp $b} keys %ForwardErrors) {
+      print "   $ThisOne : $ForwardErrors{$ThisOne} Time(s)\n";
+   }
+}
+
+if (($Detail >= 10) and (keys %SmtpConversationError)) {
+   print "\n\nSMTP commands dialog errors:\n";
+   foreach $Error (sort {$a cmp $b} keys %SmtpConversationError) {
+      print "   $Error:\n";
+      foreach $Host (sort {$a cmp $b} keys %{$SmtpConversationError{$Error}} ) {
+         print "      $Host : $SmtpConversationError{$Error}{$Host} Time(s)\n";
+      }
+   }
+}
+
+if (keys %TooManyErrors) {
+   if ($Detail >= 5) {
+      print "\n\nToo many errors in SMTP commands dialog:\n";
+      foreach $Command(sort {$a cmp $b} keys %TooManyErrors) {
+         print "   After command $Command:\n";
+         foreach $Host (sort {$a cmp $b} keys %{$TooManyErrors{$Command}} ) {
+            print "      $Host : $TooManyErrors{$Command}{$Host} Time(s)\n";
+         }
+      }
+   }
+   else {
+      $n=0;
+      $cn=scalar(keys %TooManyErrors);
+      foreach $Command(sort {$a cmp $b} keys %TooManyErrors) {
+         foreach $Host (sort {$a cmp $b} keys %{$TooManyErrors{$Command}} ) {
+            $n+=$TooManyErrors{$Command}{$Host};
+         }
+      }
+      print "\n\nToo many errors in SMTP commands dialog: $cn Command(s), $n Time(s)";
+   }
+}
+
+if (%UnauthPipeline) {
+   if ($Detail >= 5) {
+      print "\n\nImproper SMTP command pipelining attempts:\n";
+      foreach $Command (sort {$a cmp $b} keys %UnauthPipeline) {
+         print "   In command $Command from:\n";
+         foreach $Host (sort {$a cmp $b} keys %{$UnauthPipeline{$Command}} ) {
+            print "      $Host : $UnauthPipeline{$Command}{$Host} Time(s)\n";
+         }
+      }
+   }
+   else {
+      $n=0; $hn=0;
+      foreach $Command (sort {$a cmp $b} keys %UnauthPipeline) {
+         foreach $Host (keys %{$UnauthPipeline{$Command}}) {
+            $hn++;
+            $n+=$UnauthPipeline{$Command}{$Host};
+         }
+      }
+      print "\n\nImproper SMTP command pipelining attempts: $hn Host(s), $n Time(s)\n";
+   }
+}
+
+if (keys %ConnectionLost) {
+   print "\n\nConnections lost:\n";
+   foreach $ThisOne (sort {$a cmp $b} keys %ConnectionLost) {
+      print "   Connection lost while $ThisOne : $ConnectionLost{$ThisOne} Time(s)\n";
+   }
+}
+
+if (keys %MxError) {
+   if ($Detail >= 10) {
+      print "\n\nMalformed domain name in resource data of MX record:\n";
+      foreach $Domain (sort {$a cmp $b} keys %MxError) {
+         print "   $Domain : $MxError{$Domain} Time(s)\n";
+      }
+   }
+   else {
+      $n=0;
+      $dn=scalar(keys %MxError);
+      foreach $Domain (keys %MxError) {
+         $n+=$MxError{$Domain};
+      }
+      print "\n\nMalformed domain name in resource data of MX record: $dn Domain(s), $n Time(s)";
+   }
+}
+
+if (%IllegalAddressSyntax) {
+   print "\n\nIllegal address syntax:\n";
+   foreach $Command (sort {$a cmp $b} keys %IllegalAddressSyntax) {
+      if ($Detail >= 5) {
+         print "   In command $Command from:\n";
+         foreach $Host (sort {$a cmp $b} keys %{$IllegalAddressSyntax{$Command}} ) {
+            print "      $Host : $IllegalAddressSyntax{$Command}{$Host} Time(s)\n";
+         }
+      }
+      else {
+         $n=0;
+         $hn=scalar(keys %{$IllegalAddressSyntax{$Command}});
+         foreach $Host (keys %{$IllegalAddressSyntax{$Command}}) {
+            $n+=$IllegalAddressSyntax{$Command}{$Host};
+         }
+         print "   In command $Command from: $hn Host(s), $n Time(s)\n";
+      }
+   }
+}
+
+if (keys %HostnameVerification) {
+   if ($Detail >= 2) {
+      print "\n\nHostname verification errors:\n";
+      foreach $Error (sort {$a cmp $b} keys %HostnameVerification) {
+         print "   $Error : $HostnameVerification{$Error} Time(s)\n";
+      }
+   }
+   else{
+      $n=0;
+      $en=scalar(keys %HostnameVerification);
+      foreach $Error (keys %HostnameVerification) {
+         $n+=$HostnameVerification{$Error};
+      }
+      print "\n\nHostname verification errors: $en Error(s), $n Time(s)";
+   }
+}
+
+if (keys %MailerLoop) {
+   print "\n\nMailer Loop:\n";
+   foreach $Error (sort {$a cmp $b} keys %MailerLoop) {
+      print "   $Error : $MailerLoop{$Error} Time(s)\n";
+   }
+}
+
+if (keys %ValidHostname) {
+   if ($Detail >= 2) {
+      print "\n\nHostname validation errors:\n";
+      foreach $Message (sort {$a cmp $b} keys %ValidHostname) {
+         print "   $Message : $ValidHostname{$Message} Time(s)\n";
+      }
+   }
+   else{
+      $n=0;
+      $mn=scalar(keys %ValidHostname);
+      foreach $Message (keys %ValidHostname) {
+         $n+=$ValidHostname{$Message};
+      }
+      print "\n\nHostname validation errors: $mn Message(s), $n Time(s)";
+   }
+}
+
+if (keys %HeloError) {
+   print "\n\nErrors in HELO/EHLO conversation:\n";
+   foreach $Error (sort {$a cmp $b} keys %HeloError) {
+      if ($Detail >= 5) {
+         print "   $Error:\n";
+         foreach $Host (sort {$a cmp $b} keys %{$HeloError{$Error}} ) {
+            print "      $Host : $HeloError{$Error}{$Host} Time(s)\n";
+         }
+      }
+      else {
+         $n=0;
+         $hn=scalar(keys %{$HeloError{$Error}});
+         foreach $Host (keys %{$HeloError{$Error}} ) {
+            $n+=$HeloError{$Error}{$Host};
+         }
+         print "   $Error: from $hn Host(s), $n Time(s)\n";
+      }
+   }
+}
+
+if (keys %ProcessExit) {
+   print "\n\nProcess exited:\n";
+   foreach $Status (sort {$a cmp $b} keys %ProcessExit) {
+      print "   Exit status $Status:\n";
+      foreach $Process (sort {$a cmp $b} keys %{$ProcessExit{$Status}} ) {
+         print "      $Process: $ProcessExit{$Status}{$Process} Time(s)\n";
+      }
+   }
+}
+
+if (keys %UnknownWarnings) {
+   print "\n\nUnrecognized warning:\n";
+   foreach $ThisOne (sort {$a cmp $b} keys %UnknownWarnings) {
+      print "    $ThisOne : $UnknownWarnings{$ThisOne} Time(s)\n";
+   }
+}
+
+if ($#OtherList >= 0) {
+   print "\n\n**Unmatched Entries**\n\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

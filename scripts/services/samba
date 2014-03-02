@@ -1,0 +1,583 @@
+##########################################################################
+# $Id: samba,v 1.31 2008/05/06 22:29:58 mike Exp $
+##########################################################################
+# $Log: samba,v $
+# Revision 1.31  2008/05/06 22:29:58  mike
+# A few more filters -mgt
+#
+# Revision 1.30  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.29  2007/05/18 15:20:44  bjorn
+# Additional filtering, by Michał Panasiewicz.
+#
+# Revision 1.28  2007/05/16 16:37:55  bjorn
+# Correction on wrong password regexp, by Michał Panasiewicz.
+#
+# Revision 1.27  2007/05/15 04:23:49  bjorn
+# Additional filtering, by Michał Panasiewicz.
+#
+# Revision 1.26  2007/05/14 04:11:43  bjorn
+# Additional filtering, by Michał Panasiewicz.
+#
+# Revision 1.25  2007/04/15 19:15:44  bjorn
+# Improved no-service and added opened-files, by Roman Rybalko.
+#
+# Revision 1.24  2006/04/20 00:17:33  bjorn
+# Additional samba filtering (connections refused, files created) by Ivana
+# Varekova.
+#
+# Revision 1.23  2005/11/22 18:37:56  bjorn
+# Detecting invalid SID, by Ivana Varekova.
+#
+# Revision 1.22  2005/02/24 17:08:05  kirk
+# Applying consolidated patches from Mike Tremaine
+#
+# Revision 1.8  2005/02/21 04:07:36  mgt
+# Removed ignore for connect -mgt
+#
+# Revision 1.7  2005/02/21 03:28:44  mgt
+# Added patch from Anssi Kolehmained for host connections -mgt
+#
+# Revision 1.6  2005/02/16 00:43:28  mgt
+# Added #vi tag to everything, updated ignore.conf with comments, added emerge and netopia to the tree from Laurent -mgt
+#
+# Revision 1.5  2004/10/06 21:39:34  mgt
+# Patches from Pawel and Kenneth -mgt
+#
+# Revision 1.4  2004/07/29 19:33:29  mgt
+# Chmod and removed perl call -mgt
+#
+# Revision 1.3  2004/07/10 01:54:35  mgt
+# sync with kirk -mgt
+#
+# Revision 1.19  2004/06/23 15:01:17  kirk
+# - Added more patches from blues@ds.pg.gda.pl
+#
+# Revision 1.18  2004/02/03 02:45:26  kirk
+# Tons of patches, and new 'oidentd' and 'shaperd' filters from
+# Pawe? Go?aszewski" <blues@ds.pg.gda.pl>
+#
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Debug = $ENV{'LOGWATCH_DEBUG'};
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+$SocketReadError = 0;
+$SocketWriteError = 0;
+$DbOpenFail = 0;
+$DbCorrupt = 0;
+$GetDomainMasterStatusFail = 0;
+%SIDnotvalid;
+%RefConnect;
+%CrFile;
+
+if ( $Debug >= 5 ) {
+   print STDERR "\n\nDEBUG: Inside Samba Filter \n\n";
+}
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   if (
+      ($ThisLine =~ /smbd\/server\.c:open_sockets_smbd\(\d+\)  Reloading services after SIGHUP/) or
+      ($ThisLine =~ /lib\/util_sock\.c:get_peer_addr\(\d+\)  getpeername failed\. Error was (Transport endpoint|Socket) is not connected/) or
+      ($ThisLine =~ /add_domain_logon_names/) or
+      ($ThisLine =~ /become_domain_master/) or
+      ($ThisLine =~ /become_local_master/) or
+      ($ThisLine =~ /become_logon_server/) or
+      ($ThisLine =~ /cli_connect\(783\)  Error connecting to [^ ]+ \(Operation already in progress\)$/) or
+      ($ThisLine =~ /closed connection to/) or
+      ($ThisLine =~ /Connection reset by peer/) or
+      ($ThisLine =~ /Connection timed out/) or
+      ($ThisLine =~ /current master browser/) or
+      ($ThisLine =~ /Currently not implemented/) or
+      ($ThisLine =~ /debug_message/) or
+      ($ThisLine =~ /get_socket_addr\(\d+\)  getpeername failed. Error was Transport endpoint is not connected$/) or
+      ($ThisLine =~ /Got SIGHUP dumping debug info.$/) or
+      ($ThisLine =~ /Got SIGTERM: going down/) or
+      ($ThisLine =~ /matchname/i) or
+      ($ThisLine =~ /Multiple .+ responses received for a query/) or
+      ($ThisLine =~ /nmbd\/nmbd_incomingdgrams\.c:process_local_master_announce\(\d+\)$/) or
+      ($ThisLine =~ /nmbd_incomingrequests\.c:process_name_refresh_request\([0-9]+\)$/) or
+      ($ThisLine =~ /nmbd_namelistdb\.c:standard_success_release\(\d+\)  standard_success_release: Name release for name/) or
+      ($ThisLine =~ /No route to host/) or
+      ($ThisLine =~ /Operation not permitted/) or
+      ($ThisLine =~ /oplock[_ ]break/) or
+      ($ThisLine =~ /process_local_message: unknown UDP message command code \(.+\) - ignoring./) or
+      ($ThisLine =~ /process_name_refresh_request\(184\)  Error - should be sent to WINS server$/) or
+      ($ThisLine =~ /Record does not exist/) or
+      ($ThisLine =~ /response packet id \d+ received with no matching record/) or
+      ($ThisLine =~ /Failed to resend packet id \d+ to IP/) or
+      ($ThisLine =~ /smbd\/process\.c:process_smb\(\d+\)$/) or
+      ($ThisLine =~ /smbmount/) or
+      ($ThisLine =~ /start_async_dns/) or
+      ($ThisLine =~ /timeout connecting to/) or
+      ($ThisLine =~ /version .+ started/) or
+      ($ThisLine =~ /lib\/account_pol\.c:account_policy_get\(204\)  account_policy_get: tdb_fetch_uint32 failed for field \d+ \(.*\), returning 0/ ) or
+      ($ThisLine =~ /lib\/access\.c:check_access\(\d+\)$/) or
+      ($ThisLine =~ /lib\/access\.c:check_access\(\d+\)  Allowed connection from/) or
+      ($ThisLine =~ /smbd\/close\.c:close_normal_file\(\d+\)  .+ closed file/) or
+      ($ThisLine =~ /smbd\/open\.c:open_file\(\d+\)  .+ opened file/) or
+      ($ThisLine =~ /smbd\/process.c:timeout_processing\(\d+\)  Closing idle connection/) or
+      ($ThisLine =~ /nmbd\/nmbd_browsesync\.c:sync_with_dmb\(\d+\)  sync_with_dmb:  Initiating sync with domain master browser/) or
+      ($ThisLine =~ /param\/loadparm\.c:do_section\(\d+\)  Processing section/) or
+      ($ThisLine =~ /lib\/interface\.c:add_interface\(\d+\)  added interface/) or
+      ($ThisLine =~ /smbd\/reply\.c:reply_tcon_and_X\(\d+\)  Serving .+ as a Dfs root/) or
+      ($ThisLine =~ /smbd\/reply\.c:reply_special\(\d+\)  netbios connect: name1=.+ /) or
+      ($ThisLine =~ /nmbd\/nmbd_browsesync\.c:announce_local_master_browser_to_domain_master_browser\(\d+\)  announce_local_master_browser_to_domain_master_browser:  We are both a domain and a local master browser for workgroup .+ /) or
+      ($ThisLine =~ /auth\/auth\.c:check_ntlm_password\(\d+\)  check_ntlm_password:  authentication for user \[.+\] -> \[.+\] -> \[.+\] succeeded/) or
+      ($ThisLine =~ /rpc_server\/srv_samr_nt\.c:_samr_lookup_domain\(d+\)  Returning domain sid for domain ([^ ]) -> ([^ ])/) or
+		($ThisLine =~ /===============================================================/)
+   ) {
+      #Don't care about these...
+   } elsif ( ($Host, undef, $Service, undef, $User) = ( $ThisLine =~ /([^ ]+ \([^ ]+\)) (signed |)connect to service ([^ ]+) (initially |)as user ([^ ]+)/) ) {
+		$CurrentHost=$Host;
+		$Connect{$Service}{$User}{$Host}++;
+	} elsif ( ($Host,$NoService) = ( $ThisLine =~ /([^ ]+ \([^ ]+\)) couldn't find service (\S+)/ ) ) {
+		$NoServ{$Host}{$NoService}++;
+	} elsif ($ThisLine =~ s/Denied connection from\s+\((\S+)\)([ *]+|)$/$1/) {
+		$Denied{$ThisLine}++;
+   } elsif ($ThisLine =~ s/ Connection denied from\s+(\S+)$/$1/) {
+      $Denied{$ThisLine}++;
+   } elsif ( ($Where,$Ip,$Browser) = ($ThisLine =~ /(.*)  Denied connection from  \(([^ ]+)\)  Doing a node status request to the domain master browser at IP ([^ ]+) failed.  Cannot get workgroup name./ ) ) {
+      $Temp = "$Where  ($Ip)";
+      $Denied{$Temp}++;
+      $CantGetGroup{$Browser}++;
+   } elsif (
+      ($Where,$Ip,$Name,$Group,$Subnet) = ($ThisLine =~ /(.*)  Denied connection from  \(([^ ]+)\) [ *]+Samba name server ([^ ]+) is now a local master browser for workgroup ([^ ]+) on subnet ([^ ]+)/ ) or
+      ($Where,$Ip,$Name,$Group,$Subnet) = ($ThisLine =~ /(.*)  Denied connection from  \(([^ ]+)\) [ *]+Samba name server ([^ ]+) has stopped being a local master browser for workgroup  ([^ ]+) on subnet ([^ ]+)/ )
+   ) {
+      $Temp = "$Where  ($Ip)";
+      $Denied{$Temp}++;
+      $BeLocalMaster{$Subnet}{$Group}{$Name}++;
+	} elsif (($User) = $ThisLine =~ /rejected invalid user ([^ ]+)/ ) {
+		$InvalidUser{$User}++;
+   } elsif (($User) = $ThisLine =~ /Authentication for user ([^ ]+) -> ([^ ]+) FAILED with error NT_STATUS_WRONG_PASSWORD/ ) {
+      $WrongPassword{$User}++;
+	} elsif (($User) = $ThisLine =~ /Couldn't find user '([^ ]+)'/) {
+		$NotFoundUser{$User}++;
+   } elsif (($User) = $ThisLine =~ /pdb_smbpasswd\.c:build_sam_account\(\d+\)  build_sam_account: smbpasswd database is corrupt!  username ([^ ]+) not in unix passwd database!/ ) {
+      $NotFoundUser{$User}++;
+      $DbOpenFail++;
+      $DbCorrupt++;
+	} elsif (($User) = $ThisLine =~ /Rejecting user '([^ ]+)'/) {
+		$RejectedUser{$User}++;
+	} elsif ( ( $ThisLine =~ /lib\/util_sock.c:read_data\(436\)/ ) ) {
+		# This is due to a nasty bug in samba which causes it to drop connections :-(
+		$SocketReadError++;
+   } elsif (
+      ( $ThisLine =~ /lib\/util_sock.c:write_socket\(\d+\)  write_socket: Error writing \d bytes to socket/ ) or
+      ( $ThisLine =~ /lib\/util_sock.c:write_socket_data\(\d+\)  write_socket_data: write failure./ ) or
+      ( $ThisLine =~ /lib\/util_sock.c:send_smb\(\d+\)  Error writing \d+ bytes to client. / )
+   ) {
+      # Something more generic should be here
+      $SocketWriteError++;
+	} elsif (
+      ( $ThisLine =~ /unable to open passdb database.$/ ) or
+      ( $ThisLine =~ / get_sampwd_entries: Unable to open passdb.$/ )
+   ) {
+		$DbOpenFail++;
+   } elsif ( ($Name,$Group,$Subnet) = ( $ThisLine =~ /pdb_smbpasswd.c:pdb_getsampwnam\(\d+\)  unable to open passdb database\.  [ *]+Samba name server ([^ ]+) is now a local master browser for workgroup ([^ ]+) on subnet ([^ ]+)   / )) {
+      $Temp = "$Where  ($Ip)";
+      $DbOpenFail++;
+      $BeLocalMaster{$Subnet}{$Group}{$Name}++;
+	} elsif ( ($Server,$Ip,$Group) = ($ThisLine =~ /Server ([^ ]+) at IP ([^ ]+) is announcing itself as a local master browser for workgroup ([^ ]+) and we think we are master. Forcing election.$/ ) ) {
+		$Temp = $Server . "(" . $Ip . ")";
+		$ForceElection{$Group}{$Temp}++;
+   } elsif ( (undef,$Command,$Server,$Ip,undef) = ($ThisLine =~ /([^ ]+): unicast name ([^ ]+) request received for name ([^ ]+) from IP ([^ ]+) on subnet (.*)\./ ) ) {     $Temp = "$Command on subnet $Subnet : $Server ($Ip)";
+      $Temp = "$Command on subnet $Subnet : $Server ($Ip)";
+      $UnicastRegister{$Temp}++;
+	} elsif ( ($Group,$Subnet) = ($ThisLine =~ /standard_fail_register: Failed to register\/refresh name ([^ ]+) on subnet ([^ ]+)$/ ) ) {
+		$FailedRegister{$Subnet}{$Group}++;
+	} elsif ( ($Ip,$Group,undef) = ($ThisLine =~ /register_name_response: server at IP ([^ ]+) rejected our name registration of ([^ ]+) with error code ([^ ]+)\.$/ ) ) {
+		$RejectRegister{$Group}{$Ip}++;
+	} elsif ( ($Ip) = ($ThisLine =~ /get_domain_master_name_node_status_fail:  Doing a node status request to the domain master browser at IP ([^ ]+) failed\.  Cannot get workgroup name\.$/ ) ) {
+		$CantGetGroup{$Ip}++;
+	} elsif ( ($Signal,undef,$Version) = ($ThisLine =~ /INTERNAL ERROR: Signal ([^ ]+) in pid ([^ ]+) \(([^ ]+)\)  Please read the file BUGS.txt in the distribution$/ ) ) {
+		$Temp = "Version $Version with signal $Signal";
+		$Crash{$Temp}++;
+   } elsif ( ($Error) = ($ThisLine =~ /util.c:smb_panic\(\d+\)  (PANIC: internal error)$/ ) ) {
+      $Crash{$Error}++;
+	} elsif ( ( $ThisLine =~ /get_domain_master_name_node_status_fail\(([^ ]+)\)/ ) ) {
+		$GetDomainMasterStatusFail++;
+   } elsif ( ($User) = ($ThisLine =~ /pass_check_smb\(552\)  Account for user '([^ ]+)' was disabled.$/) ) {
+      $AccountDisabled{$User}++;
+   } elsif ( ($Version) = ($ThisLine =~ /Discarding invalid wins\.dat file \[(.*)\]$/) ) {
+      $DiscardWins{$Version}++;
+	} elsif ( ($user,$ip,$dir) = ($ThisLine =~ /smbd\/service.c:make_connection\([0-9]+\)  ([a-zA-Z]+) \(([\d.]+)\) Can't change directory to ([a-zA-Z_\/]+) \(Permission denied\)$/)) {
+		$PermissionDenied{$user}{$ip}{$dir}++;
+	} elsif ( ($user) = ($ThisLine =~ /smbd\/service.c:make_connection\([0-9]+\)  make_connection: ([a-zA-Z_-]+) logged in as admin user \(root privileges\)$/)) {
+		$RootLoggedIn{$user}++;
+	} elsif ( ($file,$function) = ($ThisLine =~ /([a-zA-Z_\/():\.0-9-]+)  ([a-zA-Z0-9_-]+): Not yet implemented.$/)) {
+		$NotImplemented{$file}{$function}++;
+   } elsif ( ($User,$Ip,$Directory,$Reason) = ($ThisLine =~ /service.c:make_connection\([0-9]+\)  ([^ ]+) \(([^ ]+)\) Can't change directory to ([^ ]+) \((.*)\)/)) {
+      $Temp = "Netbios name $User on $Ip";
+      $CantChangeDir{$Directory}{$Reason}{$Temp}++;
+   } elsif ( ($Signal) = ($ThisLine =~ /open_sockets\([0-9]+\)  Reloading services after ([^ ]+)/)) {
+      $ReloadAfter{$Signal}++;
+   } elsif ( ($Signal) = ($ThisLine =~ /open_sockets\([0-9]+\)  Got ([^ ]+)/)) {
+      $ReloadAfter{$Signal}++;
+   } elsif ( ($Share,$Reason) = ($ThisLine =~ /cups_printername_ok\([0-9]+\)  (Unable to get printer status for [^ ]+) - ([^ ]+)/)) {
+      $PrinterStatus{$Share}{$Reason}++;
+   } elsif ( ($Share,$Reason) = ($ThisLine =~ /cups_queue_get\([0-9]+\)  (Unable to get jobs for [^ ]+) - ([^ ]+)/)) {
+      $PrinterStatus{$Share}{$Reason}++;
+   } elsif ( $ThisLine =~ m/main\([0-9]+\)  ERROR: Failed when creating subnet lists. Exiting./) {
+      $SubnetFail{"Failed when creating subnet lists"}++;
+   } elsif ( $ThisLine =~ m/create_subnets\([0-9]+\)  create_subnets: No local interfaces !/) {
+      $SubnetFail{"No local interfaces"}++;
+   } elsif ( $ThisLine =~ m/reload_interfaces: No subnets to listen to. Shutting down.../) {
+      $SubnetFail{"No subnets to listen to. Shutting down."}++;
+   } elsif ( $ThisLine =~ s/process_get_backup_list_request\([0-9]+\)  process_get_backup_list_request: (.*)/$1/) {
+      $GetBacupList{$ThisLine}++;
+   } elsif ( ($Error) = ($ThisLine =~ /brl_init\([0-9]+\)  (Failed to open byte range locking database)$/)) {
+      $LockDbError{$Error}++;
+   } elsif ( ($Error) = ($ThisLine =~ /locking_init\([0-9]+\)  ERROR: (Failed to initialise locking database)$/)) {
+      $LockDbError{$Error}++;
+   } elsif ( ($SID,$dsid) = ($ThisLine =~ /User administrator has Primary Group SID ([^ ]+),   which conflicts with the domain sid ([^ ]+).  Failing operation.$/)) {
+      $SIDnotvalid{"$SID,$dsid"}++;
+   } elsif ( ($Addr) = ($ThisLine =~ /libsmb\/cliconnect.c:cli_connect\([0-9]+\)  Error connecting to ([0-9.]*) \(Connection refused\)/)) {
+      $RefConnect{$Addr}++;
+   } elsif ( ($Name) = ($ThisLine =~ /passdb\/pdb_smbpasswd.c:startsmbfilepwent\([0-9]+\)  startsmbfilepwent_internal: file ([^ ]*) did not exist. File successfully created./)) {
+      $CrFile{$Name}++;
+   } elsif ( ($user,$file,$read,$write) = ($ThisLine =~ /(\S+) opened file (\S+) read=(\w+) write=(\w+)/)) {
+      $OpenFile{$CurrentHost}{$user}{$file}{($read=~/Y/?"R":"").($write=~/Y/?"W":"")}++;
+   } elsif ( ($Location,$Reason) = ($ThisLine =~ /tdb_log\([0-9]+\)  tdb\(([^ ]+)\): tdb_reopen: (open failed \([^ ]+\))/)) {
+      $LockDbError{"$Location - $Reason"}++;
+	} else {
+		# Report any unmatched entries...
+		$OtherList{$ThisLine}++;
+
+      #TODO:
+      #smbd/oplock.c:process_local_message(418)  process_local_message: unknown UDP message command code (424d) - ignoring.
+      #smbd/process.c:switch_message(662)  Non-SMB packet of length 156. Terminating server
+      #smbd/process.c:switch_message(662)  Non-SMB packet of length 133. Terminating server
+      #libsmb/nmblib.c:send_udp(756)  Packet send failed to 153.19.207.127(138) ERRNO=Invalid argument
+      #lib/util_sock.c:read_data(436)  read_data: read failure for 4. Error = Brak drogi do systemu
+      #lib/util_sock.c:get_peer_addr(1229)  getpeername failed. Error was Drugi koniec nie jest po³±czony
+      #lib/util_sock.c:open_socket_out(911)  error connecting to 192.168.0.101:445 (Po³±czenie odrzucone)
+      #lib/util_sock.c:read_data(534)  read_data: read failure for 4 bytes to client 192.168.0.51. Error = Przekroczony czas oczekiwania na po³±czenie
+      #lib/util_sock.c:write_data(562)  write_data: write failure in writing to client 0.0.0.0. Error Po³±czenie zerwane przez drug± stronê
+      #libsmb/cliconnect.c:cli_start_connection(1445)  session request to P1 failed (Called name not present)
+      #printing/printing.c:start_background_queue(1419)
+      #printing/printing.c:start_background_queue(1419)  Reloading services after SIGHUP
+      #rpc_server/srv_spoolss_nt.c:spoolss_connect_to_client(2551)  spoolss_connect_to_client: connection to [P1] failed!
+      #smbd/sesssetup.c:setup_new_vc_session(799)  setup_new_vc_session: New VC == 0, if NT4.x compatible we would close all old resources
+      #smbd/utmp.c:sys_utmp_update(419)  utmp_update: uname:/var/run/utmp wname:/var/log/wtmp
+	}
+}
+
+#########################################
+#
+
+if (keys %Crash) {
+	print "\nWARNING!!!!!!\n";
+	print "Server crashed:\n";
+	foreach $Dead (sort {$a cmp $b} keys %Crash) {
+		print "   $Dead : $Crash{$Dead} Time(s)\n";
+	}
+}
+
+if (keys %SubnetFail) {
+   print "\nWARNING!!!!!!\n";
+   print "Errors when creating subnets:\n";
+   foreach $Error (sort {$a cmp $b} keys %SubnetFail) {
+      print "   $Error : $SubnetFail{$Error} Time(s)\n";
+   }
+}
+
+if (keys %ReloadAfter) {
+   print "\nReloaded services after signal:\n";
+   foreach $Signal (sort {$a cmp $b} keys %ReloadAfter) {
+      print "   $Signal : $ReloadAfter{$Signal} Time(s)\n";
+   }
+}
+
+if (keys %DiscardWins) {
+   print "\nDiscarded invalid wins.dat file with version:\n";
+   foreach $Version (sort {$a cmp $b} keys %DiscardWins) {
+      print "   $Version : $DiscardWins{$Version} Time(s)\n";
+   }
+}
+
+if (($Detail >= 5) and (keys %Connect)) {
+   print "\nOpened Sessions:\n";
+   foreach $Serv (sort {$a cmp $b} keys %Connect) {
+      print "   Service $Serv as user:\n";
+      foreach $Us (sort {$a cmp $b} keys %{$Connect{$Serv}}) {
+         print "      $Us " . (" " x (10 - length ($Us))) . "from host";
+         $size = keys %{$Connect{$Serv}{$Us}};
+         if ($size >= 2) {
+            print ":\n";
+            foreach $Ho (sort {$a cmp $b} keys %{$Connect{$Serv}{$Us}}) {
+               print "         $Ho : $Connect{$Serv}{$Us}{$Ho} Time(s)\n";
+            }
+         } else {
+            foreach $Ho (sort {$a cmp $b} keys %{$Connect{$Serv}{$Us}}) {
+               print " $Ho " . (" " x (25 - length($Ho))) . ":
+               $Connect{$Serv}{$Us}{$Ho} Time(s)\n";
+            }
+         }
+      }
+   }
+}
+
+if (($Detail >= 5) and (keys %OpenFile)) {
+   print "\nOpened Files:\n";
+   foreach $Host (sort {$a cmp $b} keys %OpenFile) {
+      print "   Host $Host:\n";
+      foreach $User (sort {$a cmp $b} keys %{$OpenFile{$Host}}) {
+         foreach $File (sort {$a cmp $b} keys %{$OpenFile{$Host}{$User}}) {
+            print "     File \"$File\"";
+            foreach $Mode (sort {$a cmp $b} keys %{$OpenFile{$Host}{$User}{$File}}) {
+               print " $Mode: $OpenFile{$Host}{$User}{$File}{$Mode} Time(s)";
+            }
+            print "\n";
+         }
+      }
+   }
+}
+
+if (keys %Denied) {
+   print "\nConnections Denied:\n";
+   foreach $Line (sort {$a cmp $b} keys %Denied) {
+      print "   $Line : $Denied{$Line} Time(s)\n";
+   }
+}
+
+if (keys %RefConnect) {
+   print "\nConnections Refused\n";
+   foreach $Line (keys %RefConnect) {
+      print "   Connection refused by $Line : $RefConnect{$Line} Time(s)\n";
+   }
+}
+
+if (keys %CrFile) {
+  print "\nCreated files\n";
+  foreach $Line (keys %CrFile) {
+     print "   file $Line did not exist. File succesfully created: $CrFile{$Line} Time(s)\n";
+  }
+}
+
+if (($Detail >= 5) and (keys %PermissionDenied)) {
+   print "\nPermission denied:\n";
+   foreach $user (sort {$a cmp $b} keys %PermissionDenied) {
+      foreach $ip (sort {$a cmp $b} keys %{$PermissionDenied{$user}}) {
+         foreach $dir (sort {$a cmp $b} keys %{$PermissionDenied{$user}{$ip}}) {
+	    print "   Permission denied (user $user from $ip) directory $dir: $PermissionDenied{$user}{$ip}{$dir} Time(s)\n";
+         }
+      }
+   }
+}
+
+if (keys %PrinterStatus) {
+   print "\nPrinter Errors:\n";
+   foreach $Share (sort {$a cmp $b} keys %PrinterStatus) {
+      print "   $Share:\n";
+      foreach $Reason (sort {$a cmp $b} keys %{$PrinterStatus{$Share}}) {
+         print "      $Reason : $PrinterStatus{$Share}{$Reason} Time(s)\n";
+      }
+   }
+}
+
+if (($Detail >= 5) and (keys %RootLoggedIn)) {
+   print "\nAdmin logins (root privileges):\n";
+   foreach $user (sort {$a cmp $b} keys %RootLoggedIn) {
+      print "   User $user: $RootLoggedIn{$user} Time(s)\n";
+   }
+}
+
+if (($Detail >= 9) and (keys %NotImplemented)) {
+   print "\nNot implemented functions:\n";
+   foreach $file (sort {$a cmp $b} keys %NotImplemented) {
+      foreach $func (sort {$a cmp $b} keys %{$NotImplemented{$file}}) {
+          print "   Function $func in $file: $NotImplemented{$file}{$func} Time(s)\n";
+      }
+   }
+}
+
+
+if (keys %ForceElection) {
+	print "\nForced Election:\n";
+	foreach $Group (sort {$a cmp $b} keys %ForceElection) {
+		print "   In workgroup $Group when announced server was:\n";
+		foreach $Host (sort {$a cmp $b} keys %{$ForceElection{$Group}}) {
+			print "      $Host : $ForceElection{$Group}{$Host} Time(s)\n";
+		}
+	}
+}
+
+if (keys %BeLocalMaster) {
+	print "\nChanged Local Master Browser:\n";
+	foreach $Subnet (sort {$a cmp $b} keys %BeLocalMaster) {
+		print "   On subnet $Subnet:\n";
+		foreach $Group (sort {$a cmp $b} keys %{$BeLocalMaster{$Subnet}}) {
+			print "      For workgroup $Group:\n";
+			foreach $Name (sort {$a cmp $b} keys %{$BeLocalMaster{$Subnet}{$Group}}) {
+				print "         $Name : $BeLocalMaster{$Subnet}{$Group}{$Name} Time(s)\n";
+			}
+		}
+	}
+}
+
+if (keys %CantGetGroup) {
+	print "\nCannot get workgroup name from domain name browser:\n";
+	foreach $Ip (sort {$a cmp $b} keys %CantGetGroup) {
+		print "   $Ip : $CantGetGroup{$Ip} Time(s)\n";
+	}
+}
+
+if ($GetDomainMasterStatusFail > 0) {
+	print "\nFailed to get Domain Master node name: $GetDomainMasterStatusFail Time(s)\n";
+}
+
+if (keys %GetBacupList) {
+   print "\nBackup list requests:\n";
+   foreach $Request (sort {$a cmp $b} keys %GetBacupList) {
+      print "   $Request : $GetBacupList{$Request} Time(s)\n";
+   }
+}
+
+if (($Detail >= 5) and (keys %NoServ)) {
+   print "\nCouldn't find services:\n";
+   foreach $Host (sort {$a cmp $b} keys %NoServ) {
+      print "   Host: $Host\n";
+      foreach $ThisOne (sort {$a cmp $b} keys %{$NoServ{$Host}}) {
+         print "      $ThisOne : $NoServ{$Host}{$ThisOne} Time(s)\n";
+      }
+   }
+}
+
+if (($Detail >= 5) and (keys %UnicastRegister)) {
+	print "\nUnicast name requests:\n";
+	foreach $ThisOne (sort {$a cmp $b} keys %UnicastRegister) {
+		print "   $ThisOne : $UnicastRegister{$ThisOne} Time(s)\n";
+	}
+}
+
+if (keys %FailedRegister) {
+	print "\nFailed to register/refresh:\n";
+	foreach $Subnet (sort {$a cmp $b} keys %FailedRegister) {
+		print "   On subnet $Subnet:\n";
+		foreach $Group (sort {$a cmp $b} keys %{$FailedRegister{$Subnet}}) {
+			print "      $Group : $FailedRegister{$Subnet}{$Group} Time(s)\n";
+		}
+	}
+}
+
+if (keys %RejectRegister) {
+	print "\nRejected our name registration:\n";
+	foreach $Group (sort {$a cmp $b} keys %RejectRegister) {
+		print "   Name $Group at IP:\n";
+		foreach $Ip (sort {$a cmp $b} keys %{$RejectRegister{$Group}}) {
+			print "      $Ip : $RejectRegister{$Group}{$Ip} Time(s)\n";
+		}
+	}
+}
+
+if ($DbOpenFail > 0) {
+	print "\nFailed to open passwd database: $DbOpenFail Time(s)\n";
+}
+
+if ($DbCorrupt > 0) {
+	print "smbpasswd database corrupt: $DbOpenFail Time(s)\n";
+}
+
+if (keys %InvalidUser) {
+   print "\nInvalid Users:\n";
+   foreach $Line (sort {$a cmp $b} keys %InvalidUser) {
+      print "   $Line : $InvalidUser{$Line} Time(s)\n";
+   }
+}
+
+if (keys %WrongPassword) {
+   print "\nWrong Passwords:\n";
+   foreach $Line (sort {$a cmp $b} keys %WrongPassword) {
+      print "   $Line : $WrongPassword{$Line} Time(s)\n";
+   }
+}
+
+
+if (keys %NotFoundUser) {
+   print "\nUsers not found in UNIX Database:\n";
+   foreach $Line (sort {$a cmp $b} keys %NotFoundUser) {
+      print "   $Line : $NotFoundUser{$Line} Time(s)\n";
+   }
+}
+
+if (keys %RejectedUser) {
+   print "\nRejected Users:\n";
+   foreach $Line (sort {$a cmp $b} keys %RejectedUser) {
+      print "   $Line : $RejectedUser{$Line} Time(s)\n";
+   }
+}
+
+if (keys %AccountDisabled) {
+    print "\nAccounts disabled:\n";
+    foreach $User (sort {$a cmp $b} keys %AccountDisabled) {
+        print "   $User : $AccountDisabled{$User} Time(s)\n";
+    }
+}
+
+if (keys %CantChangeDir) {
+   print "\nCan't change directory while browsing:\n";
+   foreach $Directory (sort {$a cmp $b} keys %CantChangeDir) {
+      print "   $Directory:\n";
+      foreach $Reason (sort {$a cmp $b} keys %{$CantChangeDir{$Directory}}) {
+         print "      $Reason:\n";
+         foreach $Entry (sort {$a cmp $b} keys %{$CantChangeDir{$Directory}{$Reason}}) {
+            print "         $Entry : $CantChangeDir{$Directory}{$Reason}{$Entry} Time(s)\n";
+         }
+      }
+   }
+}
+
+if ($SocketReadError > 0) {
+	print "\nSocket Read Error (Samba bug): $SocketReadError Time(s)\n";
+}
+
+if (keys %LockDbError) {
+   print "\nLocking Database error:\n";
+   foreach $Error (sort {$a cmp $b} keys %LockDbError) {
+      print "   $Error : $LockDbError{$Error} Time(s)\n";
+   }
+}
+
+if (keys %SIDnotvalid) {
+  print ("\nSID is not valid for the domain\n");
+  foreach $SIDLog (keys %SIDnotvalid) {
+    ($SID,$dsid) = split(",",$SIDLog);
+    print "   User administrator Primary Group SID ($SID) conflicts with the domain sid ($dsid): $SIDnotvalid{$SIDLog} Time(s) \n";
+  }
+}
+
+
+if (($Detail >= 10) and keys %OtherList) {
+	print "\n**Unmatched Entries**\n";
+	foreach $Line (sort {$a cmp $b} keys %OtherList) {
+		print "$Line : $OtherList{$Line} Time(s)\n";
+	}
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

@@ -1,0 +1,71 @@
+##########################################################################
+# $Id: sendmail-largeboxes,v 1.9 2008/06/30 20:47:20 kirk Exp $
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Colin Smith <Colin.Smith@fantasie.org.uk>
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use strict;
+use POSIX;
+
+my $SPOOLDIR = '';
+my $sizethresh = defined $ENV{sendmail_largeboxes_size} ? uc $ENV{sendmail_largeboxes_size} : 40960000;
+my $title = "Large Mailbox threshold: $sizethresh";
+my $sizebytes = $sizethresh;
+if ($sizethresh =~ /^(\d+)TB?$/i) {
+  $sizebytes = $1 * 1024 ** 4;
+} elsif ($sizethresh =~ /^(\d+)GB?$/i) {
+  $sizebytes = $1 * 1024 ** 3;
+} elsif ($sizethresh =~ /^(\d+)MB?$/i) {
+  $sizebytes = $1 * 1024 ** 2;
+} elsif ($sizethresh =~ /^(\d+)KB?$/i) {
+  $sizebytes = $1 * 1024;
+}
+$title .= ($sizethresh ne $sizebytes) ? " ($sizebytes bytes)\n" : "\n";
+
+# $hostname may be fully-qualified name
+my ($OSname, $hostname, $release, $version, $machine) = POSIX::uname();
+$hostname =~ s/\..*//;
+exit (0) if ($ENV{'LOGWATCH_ONLY_HOSTNAME'} and ($ENV{'LOGWATCH_ONLY_HOSTNAME'} ne $hostname));
+
+if (-e "/var/mail") {
+	$SPOOLDIR = "/var/mail";
+} elsif ( -e "/var/spool/mail") {
+	$SPOOLDIR = "/var/spool/mail";
+} else {
+	print "Can't find spool directory\n";
+}
+
+if ($SPOOLDIR) {
+	opendir(DIR, "$SPOOLDIR") || die "Can not opendir $SPOOLDIR: $!\n";
+	my @files = grep {!/^\./} readdir(DIR);
+	closedir DIR;
+
+	for my $filename (@files) {
+		my $checksize = (stat("$SPOOLDIR/$filename"))[7];
+               if ($checksize >= $sizebytes) {
+                       print "$title Warning: Large mailbox: $filename ($checksize)\n";
+                       $title = "";  # only print at start of report
+		}
+	}
+}
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

@@ -1,0 +1,121 @@
+
+##########################################################################
+# $Id: stunnel,v 1.7 2008/03/24 23:31:27 kirk Exp $
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$^W=1;
+use strict;
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my $DebugCounter = 0;
+
+if ( $Debug >= 5 ) {
+   print STDERR "\n\nDEBUG: Inside stunnel Filter \n\n";
+   $DebugCounter = 1;
+}
+
+my @OtherList = ();
+my %OtherList = ();
+my %connections = ();
+my %versioninfo = ();
+my $sockdata = 0;
+my $ssldata = 0;
+
+sub other {
+   my $msg = shift;
+   unless (exists $OtherList{$msg}) {
+      $OtherList{$msg} = 1;
+      push(@OtherList, $msg);
+   } else {
+      $OtherList{$msg}++;
+   }
+}
+
+my $ThisLine;
+while (defined($ThisLine = <STDIN>)) {
+   if ( $Debug >= 5 ) {
+      print STDERR "DEBUG($DebugCounter): $ThisLine";
+      $DebugCounter++;
+   }
+   chomp($ThisLine);
+   my $origline = $ThisLine;
+   if ($ThisLine =~ m/^(.+) connected from (\d+\.\d+\.\d+\.\d+)/) {
+      my $service = $1;
+      my $ip = $2;
+      if (! exists($connections{$service}{$ip})) {
+        $connections{$service}{$ip} = 0;
+      }
+      ++$connections{$service}{$ip};
+   } elsif ($ThisLine =~ m/^Connection (reset|closed): (\d+) bytes sent to SSL, (\d+) bytes sent to socket/) {
+      $ssldata += $2;
+      $sockdata += $3;
+   } elsif ($ThisLine =~ m/^Connection (reset|closed)/) {
+      # ignore
+   } elsif ($ThisLine =~ m/^stunnel [\d\.]+ on [\w\-]+ [\w\+]+ with OpenSSL [\w\.]+ \d+ \w+ \d+/) {
+      $versioninfo{$ThisLine} = 1;
+   } else {
+      # Report any unmatched entries...
+      other($ThisLine);
+   }
+}
+
+if (keys %connections) {
+   print "\nconnections:\n";
+   foreach my $service (sort keys %connections) {
+     print "  $service\n";
+     my $ips = $connections{$service};
+     foreach my $ip (sort keys %$ips) {
+        print "    $ip ", $ips->{$ip}, "\n";
+     }
+   }
+}
+
+if ($sockdata > 0) {
+   printf "\namount of socket data transferred: %.2f KB\n", $sockdata / 1024;
+}
+
+if ($ssldata > 0) {
+   printf "\namount of SSL data transferred: %.2f KB\n", $ssldata / 1024;
+}
+
+if (keys %versioninfo) {
+   print "\nversion information:\n";
+   foreach my $v (sort keys %versioninfo) {
+      print "  $v\n";
+   }
+}
+
+if (@OtherList) {
+   print "\n**Unmatched Entries**\n";
+   for (@OtherList) {
+     my $count = $OtherList{$_};
+     print "($count) $_\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

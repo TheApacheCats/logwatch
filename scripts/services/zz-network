@@ -1,0 +1,495 @@
+##########################################################################
+# $Id: zz-network,v 1.6 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: zz-network,v $
+# Revision 1.6  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.5  2008/03/24 23:31:27  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.4  2007/03/13 22:07:59  mike
+# Solaris 11 patch from Attila Csaba Marosi -mgt
+#
+# Revision 1.3  2006/02/24 16:05:27  bjorn
+# Corrected syntax, by Markus Lude.
+#
+# Revision 1.2  2006/02/02 22:08:49  bjorn
+# Clean-up (removed unused functions, fixed typos).  No functional changes.
+#
+# Revision 1.1  2005/05/04 15:54:56  bjorn
+# zz-network submitted by Laurent Dufour
+#
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Laurent Dufour
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$| = 1;
+
+use POSIX qw(uname);
+
+my (%Config);
+
+$ENV{PRINTING} = "y";
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+
+my $pathto_chkconfig = $ENV{'pathto_chkconfig'} || '/sbin/chkconfig';
+my $pathto_sysctl_conf = $ENV{'pathto_sysctl_conf'} || '/etc/sysctl.conf';
+my $pathto_vtysh = $ENV{'pathto_vtysh'} || '/usr/bin/vtysh';
+my $pathto_routeadm = $ENV{'pathto_routeadm'} || '/usr/sbin/routeadm';
+my $pathto_ip = $ENV{'pathto_ip'} || '/sbin/ip';
+
+my @ethernet_iface_list;
+my @other_iface_list;
+my @short_ethernet_iface_list;
+my @short_other_iface_list;
+my $total_iface=0;
+my $total_ethernet_iface=0;
+my $total_other_iface=0;
+
+my ($OSname, $hostname, $release, $version, $machine) = POSIX::uname();
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside zz-network Filter \n\n";
+    $DebugCounter = 1;
+}
+
+
+
+sub show_which {
+   my ($cmd) = $_[0];
+   my $path = $ENV{'PATH'} || '.';
+   @path_array = split(/:/,$path);
+   foreach $element (@path_array) {
+   my $testfile=$element .'/'.$cmd;
+   if ( -f $testfile) { print "$testfile\n"; }
+   }
+}
+
+sub chkcfg {
+   my ($service) = $_[0];
+   if (($OSname eq "Linux") && ( -f $pathto_chkconfig)) {
+      system("$pathto_chkconfig --list $service");
+   } else {
+      show_which($service);
+   }
+}
+
+sub routingCapabilities ()
+{
+        print "\n\n------------- Routing capabilities----------\n\n";
+        chkcfg('routed');
+        chkcfg('gated');
+        chkcfg('zebra');
+        chkcfg('ripd');
+        chkcfg('ripngd');
+        chkcfg('isisd');
+        chkcfg('ospfd');
+        chkcfg('ospf6d');
+        chkcfg('bgpd');
+        if ( -f $pathto_vtysh )
+        {
+         print "\n";
+         system("$pathto_vtysh -e 'sh ver'");
+        }
+
+	if ($OSname eq "SunOS") {
+	  if ( ($release eq "5.10") || ($release eq "5.11") ) {
+
+	        if ( -f $pathto_routeadm)
+        	 {
+                	open(FILE1, "$pathto_routeadm -p |")  || die "can't open $!";
+                	while (<FILE1>)
+                	{
+                         print $_;
+                	}
+                	close(FILE1) || die "can't close $!";
+         	}
+
+	 }
+	}
+        print "\n\n------------- Routing capabilities----------\n\n";
+        print "\n";
+}
+
+sub routingState ()
+{
+        print "\n\n------------- Routing states ---------------\n\n";
+        if ($OSname eq "Linux") {
+        if ( -f $pathto_sysctl_conf) {
+                open(SYSCTL, "< $pathto_sysctl_conf")  || die "can't open $!";
+                while (<SYSCTL>)
+                {
+                   if ($_ =~ /ip_forward/ ) {
+                        print $_;
+                        }
+                }
+         }
+        else
+         {
+           open(SYSCTL,"< /proc/sys/net/ipv4/ip_forward")   || die "can't open $!";
+           while (<SYSCTL>)
+                {
+                        print "/proc/sys/net/ipv4/ip_forward set to $_";
+                }
+           close(SYSCTL) || die "can't close $!";
+         }
+        }
+	
+	elsif ($OSname eq "SunOS") {
+	  if ( ($release eq "5.10") || ($release eq "5.11") ) {
+
+	        if ( -f $pathto_routeadm)
+        	 {
+                	open(FILE1, "$pathto_routeadm -p |")  || die "can't open $!";
+                	while (<FILE1>)
+                	{
+                         if (/ipv(\d+)-forwarding .*default=(\S+) current=(\S+)/) {
+			     print "IPv$1 fowarding is $3 (normal state is $2)\n";
+			 }
+                	}
+                	close(FILE1) || die "can't close $!";
+         	}
+
+	 }
+	}
+
+        else
+        {
+	 print "Unable to find routing information in your system.\n";
+        }
+        print "\n\n------------- Routing states ---------------\n\n";
+        print "\n";
+}
+
+
+
+
+
+sub routingReport ()
+{
+        print "\n\n------------- Network routes ---------------\n\n";
+        if ($OSname eq "Linux") {
+
+        open(NET, "netstat -r -n |")  || die "can't run netstat: $!";
+        while (<NET>)
+         {
+           print $_;
+         }
+        close(NET)                    || die "can't close netstat: $!";
+        }
+        else
+        {
+        open(NET, "netstat -r -n |")  || die "can't run netstat: $!";
+        while (<NET>)
+         {
+           print $_;
+         }
+        close(NET)                    || die "can't close netstat: $!";
+        }
+        print "\n\n------------- Network routes ---------------\n\n";
+        print "\n";
+}
+
+
+
+
+
+
+sub ListeningSockets ()
+{
+        print "\n\n------------- Listening sockets ---------------\n\n";
+        if ($OSname eq "Linux") {
+        open(NET, "netstat -l |")  || die "can't run netstat: $!";
+        while (<NET>)
+         {
+           if ($_ =~ /LISTEN/ ) { # grep LISTEN
+                   if (($_ =~ /LISTENING/ ) == 0 ) { #grep -v LISTENING
+                        print $_;
+                        }
+                }
+
+         }
+        close(NET)                    || die "can't run netstat: $!";
+        }
+        else
+        {
+
+        open(NET, "netstat -a -n |")  || die "can't run netstat: $!";
+        while (<NET>)
+         {
+           if ($_ =~ /LISTEN/ ) {# grep LISTEN
+                   if (($_ =~ /LISTENING/ ) == 0 ) { # grep -v LISTENING
+                        print $_;
+                        }
+                }
+
+         }
+        close(NET)                    || die "can't run netstat: $!";
+
+        }
+        print "\n\n------------- Listening sockets ---------------\n\n";
+        print "\n";
+}
+
+
+
+
+sub NetworkStats()
+{
+        my $awkprog='{printf("%s \t%6s %6s %6s \n", $1, $2, $5, $9 ); }';
+        print "\n\n------------- Network statistics ---------------\n\n";
+        if ($OSname eq "Linux") {
+
+       my $cmd_to_show_int="";
+
+       if ( -f $pathto_ip) {
+         $cmd_to_show_int=$pathto_ip." a";
+        }
+        else
+        {
+         $cmd_to_show_int="/sbin/ifconfig -a";
+        }
+
+                open(NET, "$cmd_to_show_int |")  || die "can't run $cmd_to_show_int: $!";
+                while (<NET>)
+                 {
+                   print $_;
+                 }
+                close(NET)                    || die "can't close $cmd_to_show_int: $!";
+
+        print "\n";
+	system("netstat  -i | grep -v Kernel | awk '$awkprog' ");
+	}
+	else {
+		my $netstat_cmd = "netstat -i";
+		if ($OSname eq "SunOS") {
+		    $netstat_cmd .= " -a";
+		}
+                open(NET, "$netstat_cmd |")  || die "can't run netstat: $!";
+                while (<NET>)
+                 {
+                   print $_;
+                 }
+                close(NET)                    || die "can't close netstat: $!";
+
+        }
+        print "\n\n------------- Network statistics ---------------\n\n";
+        print "\n";
+}
+
+
+
+
+
+
+
+
+sub IfconfigIface {
+
+        my ($iface) = $_[0];
+                open(NET, "ifconfig $iface |")  || die "can't run ifconfig: $!";
+                while (<NET>)
+                 {
+                   print $_;
+                 }
+                close(NET)                    || die "can't close ifconfig: $!";
+	print "\n";
+}
+
+
+
+
+
+
+
+
+sub InterfacesReport ()
+{
+
+        print "\n\n------------- Network Interfaces ---------------\n\n";
+        print "Ethernet : $total_ethernet_iface\n";
+        print "Other    : $total_other_iface\n";
+        print "Total    : $total_iface\n";
+        print "\n\n------------- Ethernet -------------------------\n\n";
+
+        if ($OSname eq "Linux") {
+         foreach $element (@ethernet_iface_list) { print "$element"; }
+        }
+        else
+        {
+         foreach $element (@short_ethernet_iface_list) { IfconfigIface ($element);}
+        }
+
+
+
+
+        print "\n\n------------- Other ----------------------------\n\n";
+        if ($OSname eq "Linux") {
+
+        foreach $element (@other_iface_list) { print "$element"; }
+
+        }
+        else
+        {
+         foreach $element (@short_other_iface_list) { IfconfigIface ($element); }
+        }
+
+
+
+        print "\n\n------------- Network Interfaces ---------------\n\n";
+        print "\n";
+}
+
+sub InterfacesCheck
+{
+        if ($OSname eq "Linux") {
+
+	my $cmd_to_show_int="";
+
+        $cmd_to_show_int="/sbin/ifconfig -a";
+
+        open(NET, "$cmd_to_show_int |")  || die "can't use $cmd_to_show_int: $!";
+        while (<NET>)
+         {
+           if ($_ =~ /Link/ ){# grep Link
+            if ($_ =~ /Ether/ ){# grep Ether
+			($if_name,$msg)=split(/ +/, $_ , 2);
+			if ($if_name =~ /(\S+)/ ) {
+                        push (@ethernet_iface_list, $_);
+		        push (@short_ethernet_iface_list, $if_name);
+                        $total_ethernet_iface++;
+                        $total_iface++;
+		 }
+                }
+                else
+                 {
+			($if_name,$msg)=split(/ +/, $_ , 2);
+			if ($if_name =~ /(\S+)/ ) {
+                        push (@other_iface_list, $_);
+		        push (@short_other_iface_list, $if_name);
+                        $total_other_iface++;
+                        $total_iface++;
+			}
+                 }
+            }
+          }
+        close(NET)                    || die "can't use $cmd_to_show_int: $!";
+
+        }
+
+        elsif ($OSname eq "SunOS") {
+
+	# Representative 'ifconfig -a' output from a local zone
+	# (global zone is similar, but has the top-level lo0, in0, etc)
+	# as well.
+	#lo0:1: flags=2001000849<UP,LOOPBACK,RUNNING,MULTICAST,IPv4,VIRTUAL> mtu 8232 index 1
+	#        inet 127.0.0.1 netmask ff000000 
+	#in0:1: flags=1000843<UP,BROADCAST,RUNNING,MULTICAST,IPv4> mtu 1500 index 2
+	#        inet 192.168.1.31 netmask ffffff00 broadcast 192.168.1.255
+	#local1:1: flags=1000843<UP,BROADCAST,RUNNING,MULTICAST,IPv4> mtu 9000 index 4
+	#        inet 172.16.0.3 netmask fffffff8 broadcast 172.16.0.7
+	#out0:1: flags=1000843<UP,BROADCAST,RUNNING,MULTICAST,IPv4> mtu 1500 index 6
+	#        inet 184.105.220.67 netmask fffffff8 broadcast 184.105.220.71
+	#lo0:1: flags=2002000849<UP,LOOPBACK,RUNNING,MULTICAST,IPv6,VIRTUAL> mtu 8252 index 1
+	#        inet6 ::1/128 
+
+	# Run through twice; a single interface plumbed with both IPv4 and IPv6
+	# can be listed separately, but shouldn't count as two interfaces
+	foreach my $ip (qw( 4 6 )) {
+	    open(NET, "/usr/sbin/ifconfig -a$ip |")  || die "can't run '/usr/sbin/ifconfig -a$ip': $!";
+	    while (<NET>)
+	     {
+	       if ($_ =~ /^(\w+\d+(?::\d+)?): flags=\d+<[^>]+> mtu (\d+)/) {
+	       		($if_name, $mtu) = ($1, $2);
+			if (! grep { $_ eq $if_name } (@ethernet_iface_list, @other_iface_list)) {
+			    # Not seen before; process it
+			    $total_iface++;
+			    if ($mtu == 1500) {
+			    	# Guess that it's ethernet
+				push @ethernet_iface_list, $if_name;
+				push @short_ethernet_iface_list, $if_name;
+				$total_ethernet_iface++;
+			    } else {
+				push @other_iface_list, $if_name;
+				push @short_other_iface_list, $if_name;
+				$total_other_iface++;
+			    }
+			}
+		}
+	      }
+	    close(NET)                    || die "can't use '/usr/sbin/ifconfig -a$ip': $!";
+	}
+
+        }
+        else
+        {
+
+
+        open(NET, "netstat -i |")  || die "can't run netstat: $!";
+        while (<NET>)
+         {
+           if (($_ =~ /Name/ ) == 0 ) {# grep -v Name
+            if ($_ =~ /1500/ ){# grep Ether
+			($if_name,$msg)=split(/ +/, $_ , 2);
+			if ($if_name =~ /(\S+)/ ) {
+                        push (@ethernet_iface_list, $_);
+		        push (@short_ethernet_iface_list, $if_name);
+                        $total_ethernet_iface++;
+                        $total_iface++;
+		 }
+                }
+                else
+                 {
+			($if_name,$msg)=split(/ +/, $_ , 2);
+			if ($if_name =~ /(\S+)/ ) {
+                        push (@other_iface_list, $_);
+		        push (@short_other_iface_list, $if_name);
+                        $total_other_iface++;
+                        $total_iface++;
+		  }
+                 }
+            }
+          }
+        close(NET)                    || die "can't run ifconfig: $!";
+
+        }
+
+
+}
+
+   InterfacesCheck();
+   InterfacesReport();
+   if ($Detail > 10) {
+    ListeningSockets();
+   }
+   NetworkStats();
+   if ($Detail > 5) {
+    routingState();
+    routingCapabilities();
+    routingReport();
+   }
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

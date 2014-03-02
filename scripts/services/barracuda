@@ -1,0 +1,338 @@
+
+##########################################################################
+##########################################################################
+#
+#  Barracuda Spam Firewall parser
+#  Written by Hugo van der Kooij <hugo@vanderkooij.org> (HvdK)
+#  Based on existing code of logwatch and the docuemntation on:
+#  http://www.barracudanetworks.com/ns/downloads/BarracudaSyslog.pdf
+#
+# Revision 0.9  2007/08/27 HvdK
+# Started the scanner for the logs of Barracuda Spam firewalls.
+
+########################################################
+## Copyright (c) 2008 Hugo van der Kooij <hugo@vanderkooij.org>
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+
+sub Round {
+   my $input = $_[0];
+   my $digits = $_[1];
+   my $factor = (10**$digits);
+   my $result = (int( ($input * $factor) + .5) / $factor);
+   return $result;
+}
+
+# Text messages for the RECV and SCAN action codes:
+$RSaction[0] = "Allowed Message(s)";
+$RSaction[1] = "Aborted Message(s)";
+$RSaction[2] = "Blocked Message(s)";
+$RSaction[3] = "Quarantined Message(s)";
+$RSaction[4] = "Tagged Message(s)";
+$RSaction[5] = "Deferred Message(s)";
+$RSaction[6] = "Per-User Quarantined Message(s)";
+$RSaction[7] = "Whitelisted Message(s)";
+
+# Text messages for the SEND action codes:
+$Saction[0] = "UNKNOWN";
+$Saction[1] = "Delivered Message(s)";
+$Saction[2] = "Rejected Message(s)";
+$Saction[3] = "Deferred Message(s)";
+$Saction[4] = "Expired Message(s)";
+
+# Text messages for the reason codes:
+$Reason[0] = "Allowed";
+$Reason[1] = "Virus detected";
+$Reason[2] = "Banned attachment";
+$Reason[3] = "RBL Match";
+$Reason[4] = "Rate Control";
+$Reason[5] = "Too Many Message(s) In Session";
+$Reason[6] = "Timeout Exceeded";
+$Reason[7] = "No such Domain";
+$Reason[8] = "No such User";
+$Reason[9] = "Subject Filter Match";
+$Reason[10] = "UNKNOWN (10)";
+$Reason[11] = "Client IP";
+$Reason[12] = "Recipient Address Rejected";
+$Reason[13] = "No valid Recipients";
+$Reason[14] = "Domain Not Found";
+$Reason[15] = "Sender Address Rejected";
+$Reason[16] = "UNKNOWN (16)";
+$Reason[17] = "Need Fully Qualified Recipient";
+$Reason[18] = "Need Fully Qualified Sender";
+$Reason[19] = "Unsupported Command";
+$Reason[20] = "MAIL FROM Syntax Error";
+$Reason[21] = "Bad Address Syntax";
+$Reason[22] = "RCPT TO Syntax Error";
+$Reason[23] = "Send EHLO/HELO First";
+$Reason[24] = "Need MAIL Command";
+$Reason[25] = "Nested MAIL Comand";
+$Reason[26] = "UNKNOWN (26)";
+$Reason[27] = "EHLO/HELO Syntax Error";
+$Reason[28] = "UNKNOWN (28)";
+$Reason[29] = "UNKNOWN (29)";
+$Reason[30] = "Mail Protocol Error";
+$Reason[31] = "Score";
+$Reason[32] = "UNKNOWN (32)";
+$Reason[33] = "UNKNOWN (33)";
+$Reason[34] = "Header Filter Match";
+$Reason[35] = "Sender Block/Accept";
+$Reason[36] = "Recipient Block/Accept";
+$Reason[37] = "Body Filter Match";
+$Reason[38] = "Message Size Bypass";
+$Reason[39] = "Intention Analysis Match";
+$Reason[40] = "SPF/Caller-ID";
+$Reason[41] = "Client Host Rejected";
+$Reason[42] = "UNKNOWN (42)";
+$Reason[43] = "UNKNOWN (43)";
+$Reason[44] = "Authentication Not Enabed";
+$Reason[45] = "Allowed Message Size Exceeded";
+$Reason[46] = "Too Many Recipients";
+$Reason[47] = "Need RCPT Command";
+$Reason[48] = "DATA Syntax Error";
+$Reason[49] = "Internal Error";
+$Reason[50] = "Too Many Hops";
+$Reason[51] = "UNKNOWN (51)";
+$Reason[52] = "UNKNOWN (52)";
+$Reason[53] = "UNKNOWN (53)";
+$Reason[54] = "UNKNOWN (54)";
+$Reason[55] = "Invalid Parameter Syntax";
+$Reason[56] = "STARTTLS Syntax Error";
+$Reason[57] = "TLS Allready Active";
+$Reason[58] = "Too Many Errors";
+$Reason[59] = "Need STARTTLS First";
+$Reason[60] = "Spam Fingerprint Found";
+
+while (defined($ThisLine = <STDIN>))
+{
+   if ( ($address, $id, $start_time, $end_time, $type, $info) = ($ThisLine =~ /([^\s]+)\s([^\s]+)\s(\d+)\s(\d+)\s(RECV|SCAN|SEND)\s(.*)$/) )
+   {
+      ($ip) = ($address =~ /\[(.*)\]/);
+      $time = ($end_time - $start_time);
+      if ( $type =~ /RECV/ )
+      {
+         if ( ($sender, $recipient, $action, $reason, $reason_extra) = ($info =~ /([^\s]+)\s([^\s]+)\s(\d+)\s(\d+)\s(.*)$/) ) {
+            $RECVaction{$action}++;
+            $RECVreason{$reason}++;
+            $RECVreason_extra{$reason_extra}++;
+            if ( ($reason_extra =~ /^-[| ]$/) or ($reason < 1) ) {
+            } else {
+               $RECVReasons{$reason_extra}++;
+               $RECVReason{$reason_extra} = $reason;
+            }
+            $RECVtime_total{$action} = ($RECVtime_total{$action} + $time);
+            $RECVtime_div{$action}++;
+            if ($time < $RECVtime_min{$action}) {
+               $RECVtime_min{$action} = $time;
+            } elsif ($RECVtime_min{$action} eq "") {
+               $RECVtime_min{$action} = $time;
+            }
+            if ($time > $RECVtime_max{$action}) {
+               $RECVtime_max{$action} = $time;
+            } elsif ($RECVtime_max{$action} eq "") {
+               $RECVtime_max{$action} = $time;
+            }
+         } else {
+            push @OtherList,$ThisLine;
+         }
+      } elsif ( $type =~ /SCAN/ ) {
+         if ( ($enc, $sender, $recipient, $score, $action, $reason, $reason_extra, $subject) = ($info =~ /([^\s]+)\s([^\s]+)\s([^\s]+)\s([-\.\d+]+)\s(\d+)\s(\d+)\s(.*)\sSUBJ:(.*)$/) ) {
+            if ( ($size) = ($reason_extra =~ /\sSZ:(\d+)$/) ) {
+               $reason_extra =~ s/\sSZ:(\d+)$//;
+               $SCANsize_total{$action} = ($SCANsize_total{$action} + $size);
+               $SCANsize_div{$action}++;
+            }
+            $SCANaction{$action}++;
+            $SCANreason{$reason}++;
+            if ($score =~ /^-$/) {
+            } else {
+               $score_total{$action} = ($score_total{$action} + $score);
+               $score_div{$action}++;
+               if ($score < $score_min{$action}) {
+                  $score_min{$action} = $score;
+               } elsif ($score_min{$action} eq "") {
+                  $score_min{$action} = $score;
+               }
+               if ($score > $score_max{$action}) {
+                  $score_max{$action} = $score;
+               } elsif ($score_max{$action} eq "") {
+                  $score_max{$action} = $score;
+               }
+            }
+            if ($reason_extra =~ /^-$/) {
+            } else {
+               $SCANReasons{$reason_extra}++;
+               $SCANReason{$reason_extra} = $reason;
+            }
+            $SCANtime_total{$action} = ($SCANtime_total{$action} + $time);
+            $SCANtime_div{$action}++;
+            if ($time < $SCANtime_min{$action}) {
+               $SCANtime_min{$action} = $time;
+            } elsif ($SCANtime_min{$action} eq "") {
+               $SCANtime_min{$action} = $time;
+            }
+            if ($time > $SCANtime_max{$action}) {
+               $SCANtime_max{$action} = $time;
+            } elsif ($SCANtime_max{$action} eq "") {
+               $SCANtime_max{$action} = $time;
+            }
+         } else {
+            push @OtherList,$ThisLine;
+         }
+      } elsif ( $type =~ /SEND/ ) {
+         if ( ($enc, $action, $qid, $response) = ($info =~ /([^\s]+)\s(\d+)\s([^\s]+)\s(.*)$/) ) {
+            $SENDaction{$action}++;
+            if (($delivery) = ($response =~/^(\d+)\s.*/) ) {
+               $SENDresponse{$delivery}++;
+            }
+         } else {
+            push @OtherList,$ThisLine;
+         }
+      } else {
+         push @OtherList,$ThisLine;
+      }
+   } elsif ( $ThisLine =~ /\s[RECV|SCAN|SEND]\s/) {
+      push @OtherList,$ThisLine;
+   }
+}
+
+##################################################################
+
+if ($#OtherList >= 0)
+{
+   print "\n\n**Unmatched Entries**\n\n";
+   print @OtherList;
+}
+
+if (keys %RECVaction) {
+   print "\nReceive actions:\n";
+   foreach $action (sort {$a cmp $b} keys %RECVaction) {
+      print '   ' . $RSaction[$action] . ": ". $RECVaction{$action} . "\n";
+   }
+}
+
+if (keys %SCANaction) {
+   print "\nScanning actions:\n";
+   foreach $action (sort {$a cmp $b} keys %SCANaction) {
+      print '   ' . $RSaction[$action] . ": ". $SCANaction{$action} . "\n";
+   }
+}
+
+if (keys %SENDaction) {
+   print "\nSending actions:\n";
+   foreach $action (sort {$a cmp $b} keys %SENDaction) {
+      print '   ' . $Saction[$action] . ": ". $SENDaction{$action} . "\n";
+   }
+}
+
+if (keys %RECVreason) {
+   print "\nBlocked incoming messages:\n";
+   foreach $reason (sort {$a cmp $b} keys %RECVreason) {
+      if ($reason > 0) {
+         print '   ' . $Reason[$reason] . " : ". $RECVreason{$reason} . "\n";
+      }
+   }
+}
+
+if ( ($Detail >= 10) and (keys %RECVReasons) ) {
+   print "\nDetails of blocked incoming messages :\n";
+   foreach $reason (sort {$a cmp $b} keys %RECVReasons) {
+      print '   ' . $Reason[$RECVReason{$reason}] . " : " . $reason . " : ". $RECVReasons{$reason} . "\n";
+   }
+}
+
+if (keys %RECVtime_total) {
+   print "\nReceive timing:\n";
+   foreach $action (sort {$a cmp $b} keys %RECVtime_total) {
+      $RECVtime = ($RECVtime_total{$action} / $RECVtime_div{$action});
+      print '   ' . $RSaction[$action] . " :\n";
+      print "\tMinimum : " . $RECVtime_min{$action} . "\n";
+      print "\tAverage : " . Round($RECVtime, 1) . "\n";
+      print "\tMaximum : " . $RECVtime_max{$action} . "\n";
+   }
+}
+
+if (keys %SCANreason) {
+   print "\nDecisions while scanning:\n";
+   foreach $reason (sort {$a cmp $b} keys %SCANreason) {
+      print '   ' . $Reason[$reason] . " : ". $SCANreason{$reason} . "\n";
+   }
+}
+
+if ( ($Detail >= 10) and (keys %SCANReasons) ) {
+   print "\nDetails of decisions while scanning:\n";
+   foreach $reason (sort {$a cmp $b} keys %SCANReasons) {
+      print '   ' . $Reason[$SCANReason{$reason}] . " : " . $reason . " : ". $SCANReasons{$reason} . "\n";
+   }
+}
+
+if (keys %SCANtime_total) {
+   print "\nScan timing:\n";
+   foreach $action (sort {$a cmp $b} keys %SCANtime_total) {
+      $SCANtime = ($SCANtime_total{$action} / $SCANtime_div{$action});
+      print '   ' . $RSaction[$action] . " :\n";
+      print "\tMinimum : " . $SCANtime_min{$action} . "\n";
+      print "\tAverage : " . Round($SCANtime, 1) . "\n";
+      print "\tMaximum : " . $SCANtime_max{$action} . "\n";
+   }
+}
+
+if (keys %SCANsize_total) {
+   print "\nMessage sizes:\n";
+   foreach $action (sort {$a cmp $b} keys %SCANsize_total) {
+      $SCANsize = ($SCANsize_total{$action} / $SCANsize_div{$action});
+      print '   ' . $RSaction[$action] . " :\n";
+#      print "\tMinimum : " . $SCANsize_min{$action} . "\n";
+      print "\tAverage : " . Round($SCANsize, 0) . "\n";
+#      print "\tMaximum : " . $SCANsize_max{$action} . "\n";
+   }
+}
+
+
+if (keys %SENDreason) {
+   print "\nSending reasons:\n";
+   foreach $reason (sort {$a cmp $b} keys %SENDreason) {
+      print '   ' . $Reason[$reason] . " : ". $SENDreason{$reason} . "\n";
+   }
+}
+
+if (keys %SENDresponse) {
+   print "\nSending responses:\n";
+   foreach $response (sort {$a cmp $b} keys %SENDresponse) {
+      print '   ' . $response . ": ". $SENDresponse{$response} . "\n";
+   }
+}
+
+if (keys %score_total) {
+   print "\nScores:\n";
+   foreach $action (sort {$a cmp $b} keys %score_total) {
+      $score = ($score_total{$action} / $score_div{$action});
+      print '   ' . $RSaction[$action] . " :\n";
+      print "\tMinimum : " . $score_min{$action} . "\n";
+      print "\tAverage : " . Round($score, 3) . "\n";
+      print "\tMaximum : " . $score_max{$action} . "\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

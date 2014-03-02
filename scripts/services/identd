@@ -1,0 +1,164 @@
+
+##########################################################################
+# $Id: identd,v 1.13 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+#####################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside Identd Filter \n\n";
+    $DebugCounter = 1;
+}
+
+# This whole NeedNextLine thing is because there are multiple lines that
+# go together for these log entries...
+
+$ThisLine = <STDIN>;
+while (defined($ThisLine)) {
+    if ( $Debug >= 5 ) {
+        print STDERR "DEBUG: Line Number " . $DebugCounter . ":\n";
+        print STDERR "DEBUG: " . $ThisLine;
+    }
+    $NeedNextLine = 1;
+    if ( ($IP,$Hostname,$Port) = ($ThisLine =~ m/^from: (\d+\.\d+\.\d+\.\d+) \( ([^ ]*) \) for: \d+, (\d+)$/) ) {
+        # this means that somebody accessed identd...
+        if ( $Debug >= 5 ) {
+            print STDERR "DEBUG: Found -Connection From- Line -- Reading another line\n";
+            $DebugCounter++;
+        }
+        if (defined($NextLine = <STDIN>)) {
+            if ( $Debug >= 5 ) {
+        	print STDERR "DEBUG: Line Number " . $DebugCounter . ":\n";
+        	print STDERR "DEBUG: " . $NextLine;
+            }
+            if ( ($User) = ($NextLine =~ m/^Successful lookup: \d+ , \d+ : ([^ ]+)\.[^ ]+/) ) {
+        	if ( $Debug >= 5 ) {
+        	    print STDERR "DEBUG: Found -Successful Lookup- line (" . $User . ")\n";
+        	}
+        	${Identd{$IP}}[0] = $Hostname;
+        	${Identd{$IP}}[1]++;
+        	push @{${Identd{$IP}}[2]}, $Port;
+        	push @{${Identd{$IP}}[3]}, $User;
+            }
+            else {
+        	if ( $Debug >= 5 ) {
+        	    print STDERR "DEBUG: No matches... keeping current line.\n";
+        	}
+        	$ThisLine = $NextLine;
+        	$NeedNextLine = 0;
+            }
+        }
+    }
+    elsif ( ($IP,$Hostname) = ($ThisLine =~ m/^from: (\d+\.\d+\.\d+\.\d+) \(([^ ]*)\) EMPTY REQUEST$/) ) {
+        if ( $Debug >= 5 ) {
+            print STDERR "DEBUG: Found -Empty Request- Line\n";
+        }
+        $Text = "   " . $Hostname . " (" . $IP . ")";
+        push @EmptyRequests,$Text;
+    }
+    elsif ( ($IP,$Hostname,$Name) = ($ThisLine =~ m/^from: (\d+\.\d+\.\d+\.\d+) \(([^ ]*)\) INVALID REQUEST: (.*)$/) ) {
+        if ( $Debug >= 5 ) {
+            print STDERR "DEBUG: Found -Invalid Request- Line\n";
+        }
+        $Text = "   " . $Hostname . " (" . $IP . ") - " . $Name;
+        push @InvalidRequests,$Text;
+    }
+    elsif ( $ThisLine =~ m/^Returned: \d+ , \d+ : NO-USER/ ) {
+        # Do nothing...
+    }
+    elsif ( ($Host) = ( $ThisLine =~ /^Connection from ([^ ]+)/ ) ) {
+        chomp($Host);
+        if (defined($NextLine = <STDIN>)) {
+            if ( $Debug >= 5 ) {
+        	print STDERR "DEBUG: Line Number " . $DebugCounter . ":\n";
+        	print STDERR "DEBUG: " . $NextLine;
+            }
+            if ( ($Port,$User) = ($NextLine =~ m/^Successful lookup: \d+ , (\d+) : ([^ ]+)/) ) {
+        	if ( $Debug >= 5 ) {
+        	    print STDERR "DEBUG: Found -Successful Lookup- line (" . $User . ")\n";
+        	}
+        	chomp($Port); chomp($User);
+        	${Identd{$Host}}[0] = $Host;
+        	${Identd{$Host}}[1]++;
+        	push @{${Identd{$Host}}[2]}, $Port;
+        	push @{${Identd{$Host}}[3]}, $User;
+            }
+            else {
+        	if ( $Debug >= 5 ) {
+        	    print STDERR "DEBUG: No matches... keeping current line.\n";
+        	}
+        	$ThisLine = $NextLine;
+        	$NeedNextLine = 0;
+            }
+        }
+    }
+    elsif ($ThisLine =~ /^Successful lookup: [1234567890]+ , [1234567890]+ : [^ ]+/ ) {
+        # skip empty entry ...
+    }
+    else {
+        # Report any unmatched entries...
+        if ( $Debug >= 5 ) {
+            print STDERR "DEBUG: Found unmatched line\n";
+        }
+        chomp($ThisLine);
+        $OtherList{$ThisLine}++;
+    }
+    if ($NeedNextLine == 1) {
+        $ThisLine = <STDIN>;
+    }
+}
+
+if ( (keys %Identd) and ($Detail >= 10) ) {
+    print "Identd Lookups:\n";
+    foreach $ThisOne (keys %Identd) {
+        print "   Host: " . ${Identd{$ThisOne}}[0] . " (" . $ThisOne . ") - " . ${Identd{$ThisOne}}[1] . " Connection(s).\n";
+
+    }
+}
+
+if (($#EmptyRequests >= 0) and ($Detail >= 5)) {
+    print "\nEmpty requests:\n";
+    foreach $ThisOne (@EmptyRequests) {
+        print "   " . $ThisOne . "\n";
+    }
+}
+
+if (($#InvalidRequests >= 0) and ($Detail >= 5)) {
+    print "\nInvalid requests:\n";
+    foreach $ThisOne (@InvalidRequests) {
+        print "   " . $ThisOne . "\n";
+    }
+}
+
+if (keys %OtherList) {
+    print "\n**Unmatched Entries**\n";
+    foreach $line (sort {$a cmp $b} keys %OtherList) {
+        print "$line: $OtherList{$line} Time(s)\n";
+    }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

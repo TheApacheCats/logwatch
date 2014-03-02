@@ -1,0 +1,349 @@
+##########################################################################
+# $Id: extreme-networks,v 1.4 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Laurent DUFOUR <laurent.dufour@havas.com>,<dufour_l@hotmail.com>
+#    based on the work of
+#    Kirk Bauer <kirk@kaybee.org>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to laurent.dufour@havas.com
+########################################################
+
+########################################################
+## Copyright (c) 2008 Laurent DUFOUR
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':all';
+
+$Debug = ValueOrDefault($ENV{'LOGWATCH_DEBUG'}, 0);
+$Detail = ValueOrDefault($ENV{'LOGWATCH_DETAIL_LEVEL'}, 30);
+
+# Avoid "Use of uninitialized value" warning messages.
+sub ValueOrDefault {
+    my ($value, $default) = @_;
+    return ($value ? $value : $default);
+}
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside EXTREME NETWORKS Filter \n\n";
+    $DebugCounter = 1;
+}
+
+
+my ($month,$day,$time,$host_ip,$host,$conn,$msg,$message);
+
+while (defined($ThisLine = <STDIN>)) {
+    if ( $Debug >= 30 ) {
+	print STDERR "DEBUG($DebugCounter): $ThisLine";
+	$DebugCounter++;
+    }
+
+($month,$day,$time,$host,$msg)=split(/ +/,$ThisLine,6);
+
+   if ( ($ThisLine =~ /traffic/ ) or
+         ($ThisLine =~ /Copyright/ ) or
+         ($ThisLine =~ /removed due to simultaneous rekey/ ) or
+         ($ThisLine =~ /Responded to the first peer message/ ) or
+         ($ThisLine =~ /NBR change/ ) or
+         ($ThisLine =~ /accept udp/ ) or
+         ($ThisLine =~ /accept tcp/ ) or
+         ($ThisLine =~ /accept icmp/ ) or
+         ($ThisLine =~ /accept ip/ ) or
+         ($ThisLine =~ /denied udp/ ) or
+         ($ThisLine =~ /denied tcp/ ) or
+         ($ThisLine =~ /denied icmp/ ) or
+         ($ThisLine =~ /denied ip/ )
+    ) {
+      # don't care about this, will code this later
+   }
+   elsif ( ($config,$msg) = ($ThisLine =~ /SYST: Save to the (\S+) configuration completed/) ) {
+      $SysCfgSavedCompleted{$host}{$config}++;
+   }
+
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /SYST: (\d+\.\d+\.\d+\.\d+) admin: save (.*)/) ) {
+      $SysCfgSaved{$host}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($ThisLine =~ /Compiled/) ) {
+      $Started{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog host domain name has been changed/) ) {
+      $SyslogHost{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog facility has been changed/) ) {
+      $SyslogFacility{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog security facility has been changed/) ) {
+      $SyslogFacility{$host}++;
+   }
+   elsif ( ($ThisLine =~ /The system clock has been updated through NTP./) ) {
+      $NTPUpdated{$host}++;
+   }
+   elsif ( ($ThisLine =~ /failed to get clock through NTP/) ) {
+      $NTPFailed{$host}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RELOAD: (.*)/) ) {
+      $ReloadRequested{$host}{$message}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RESTART: (.*)/) ) {
+      $Restarted{$host}{$message}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /(\S+) logged in through (\S+) \((\d+\.\d+\.\d+\.\d+)\)/) ) {
+       if ($Debug >= 5) {
+	   print STDERR "DEBUG: Found -$1 logged in from $3 using $2\n";
+       }
+       if ($Detail >= 20) {
+	   $Users{$host}{$2}{$3}{$1}++;
+       } else {
+	   $Users{$host}{$2}{$3}{"(all)"}++;
+       }
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYST: User (\S+) logged out from (\S+) \((\d+\.\d+\.\d+\.\d+)\)/) ) {
+       if ($Debug >= 5) {
+	   print STDERR "DEBUG: Found -$1 logged out from $3 using $2\n";
+       }
+       if ($Detail >= 20) {
+	   $UsersOut{$host}{$2}{$3}{$1}++;
+       } else {
+	   $UsersOut{$host}{$2}{$3}{"(all)"}++;
+       }
+   }
+   elsif ( $ThisLine =~ m/Admin user (\S+) login attempt for (\S+) management \(port (\d+)\) from (.+):(.+). failed. (.*)/ ) {
+       if ( $Debug >= 5 ) {
+	   print STDERR "DEBUG: Found -Failed login- line\n";
+       }
+       my $name = LookupIP($4);
+       $BadLogins{$host}{"$1/$2 from $name"}++;
+   }
+   elsif ( $ThisLine =~ m/SSH client at (.+) has attempted to make an SCS connection to interface untrust with IP (.+) but failed (.*)/ ) {
+       my $name = LookupIP($2);
+       $Temp = "SSH from $name";
+       $BadLogins{$host}{$Temp}++;
+       $IllegalUsers{$host}{$Temp}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /SYST: (.*)/) ) {
+      $SYST{$host}{$message}++;
+   }
+else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if (keys %Started) {
+   print "\nDevice started :\n";
+   foreach $ThisOne (keys %Started) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Started{$ThisOne}}) {
+         print "\t Started" .$ThatOne . "\t: " . $Started{$ThisOne}{$ThatOne} . "{ Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYST) {
+   print "\nDevice where system command where used :\n";
+   foreach $ThisOne (keys %SYST) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SYST{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYST{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPUpdated) {
+   print "\nDevice where The system clock has been updated through NTP :\n";
+   foreach $ThisOne (keys %NTPUpdated) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NTPUpdated{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPUpdated{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPFailed) {
+   print "\nDevice where failed to get clock through NTP :\n";
+   foreach $ThisOne (keys %NTPFailed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NTPFailed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPFailed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if (keys %SyslogFacility) {
+   print "\nDevice where Syslog facility has been changed  :\n";
+   foreach $ThisOne (keys %SyslogFacility) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SyslogFacility{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SyslogFacility{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SyslogHost) {
+   print "\nDevice where Syslog host has been changed  :\n";
+   foreach $ThisOne (keys %SyslogHost) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SyslogHost{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SyslogHost{$ThisOne}{$ThisOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if (keys %Restarted) {
+   print "\nDevice restarted :\n";
+   foreach $ThisOne (keys %Restarted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Restarted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Restarted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ReloadRequested) {
+   print "\nDevice reload requested :\n";
+   foreach $ThisOne (keys %ReloadRequested) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ReloadRequested{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ReloadRequested{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+
+if (keys %SysCfgSaved) {
+   print "\nDevice where system config have been saved :\n";
+   foreach $ThisOne (keys %SysCfgSaved) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SysCfgSaved{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SysCfgSaved{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SysCfgSavedCompleted) {
+   print "\nDevice where system config have been completely saved :\n";
+   foreach $ThisOne (keys %SysCfgSavedCompleted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SysCfgSavedCompleted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SysCfgSavedCompleted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+
+if (keys %BadLogins) {
+    print "\nFailed logins from these:\n";
+    foreach $ThisOne (keys %BadLogins) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$BadLogins{$ThisOne}}) {
+	    print "\t   $_: $BadLogins{$ThisOne}{$_} Time(s)\n";
+	}
+    }
+}
+
+if (keys %IllegalUsers) {
+    print "\nIllegal users from these:\n";
+    foreach $ThisOne (keys %IllegalUsers) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$IllegalUsers{$ThisOne}}) {
+	    print "\t   $_: $IllegalUsers{$ThisOne}{$_} Time(s)\n";
+
+	}
+    }
+}
+
+
+if (keys %Users) {
+    print "\nUsers logging in through :\n";
+foreach $ThisOne (keys %Users) {
+    print "   " . $ThisOne . ":\n";
+
+foreach $user (sort {$a cmp $b} keys %{$Users{$ThisOne}}) {
+    print "   $user:\n";
+    my $totalSort = TotalCountOrder(%{$Users{$ThisOne}{$user}}, \&SortIP);
+    foreach my $ip (sort $totalSort keys %{$Users{$ThisOne}{$user}}) {
+	my $name = LookupIP($ip);
+	if ($Detail >= 20) {
+            print "      $name:\n";
+            my $sort = CountOrder(%{$Users{$ThisOne}{$user}{$ip}});
+            foreach my $method (sort $sort keys %{$Users{$ThisOne}{$user}{$ip}}) {
+		my $val = $Users{$ThisOne}{$user}{$ip}{$method};
+		my $plural = ($val > 1) ? "s" : "";
+		print "         $method: $val time$plural\n";
+            }
+	} else {
+            my $val = (values %{$Users{$ThisOne}{$user}{$ip}})[0];
+            my $plural = ($val > 1) ? "s" : "";
+            print "      $name: $val time$plural\n";
+	}
+    }
+}
+}
+}
+
+
+if (keys %UsersOut) {
+    print "\nUsers logging out through :\n";
+foreach $ThisOne (keys %UsersOut) {
+    print "   " . $ThisOne . ":\n";
+
+foreach $user (sort {$a cmp $b} keys %{$UsersOut{$ThisOne}}) {
+    print "   $user:\n";
+    my $totalSort = TotalCountOrder(%{$UsersOut{$ThisOne}{$user}}, \&SortIP);
+    foreach my $ip (sort $totalSort keys %{$UsersOut{$ThisOne}{$user}}) {
+	my $name = LookupIP($ip);
+	if ($Detail >= 20) {
+            print "      $name:\n";
+            my $sort = CountOrder(%{$UsersOut{$ThisOne}{$user}{$ip}});
+            foreach my $method (sort $sort keys %{$UsersOut{$ThisOne}{$user}{$ip}}) {
+		my $val = $UsersOut{$ThisOne}{$user}{$ip}{$method};
+		my $plural = ($val > 1) ? "s" : "";
+		print "         $method: $val time$plural\n";
+            }
+	} else {
+            my $val = (values %{$UsersOut{$ThisOne}{$user}{$ip}})[0];
+            my $plural = ($val > 1) ? "s" : "";
+            print "      $name: $val time$plural\n";
+	}
+    }
+}
+}
+}
+
+
+
+
+
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

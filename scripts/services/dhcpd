@@ -1,0 +1,223 @@
+
+use strict;
+##########################################################################
+# $Id: dhcpd,v 1.21 2009/02/20 18:04:39 mike Exp $
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my %data;
+
+my %clientrequest;
+
+# This filter is very basic... much more could be done with it
+
+while (my $line = <STDIN>) {
+   chomp $line;
+   $line =~ s/^\s+//;
+   $line =~ s/\s+$//;
+   next unless $line;
+   if (
+      # All of these entries are generated at startup unless -q option used :(
+          # Name of ISC was changed in 2004
+      ($line =~ /^Internet (Systems|Software) Consortium DHCP Server/) or
+      ($line =~ /^Copyright/) or
+      ($line =~ /^All rights reserved/) or
+      ($line =~ /^Please contribute if you find this software useful/) or
+      ($line =~ /^For info, please visit/) or
+      # Other lines to ignore
+      ($line =~ /^Wrote .* to leases file\./) or
+      ($line =~ /^already acking lease/) or
+      ($line =~ /^dhcpd shutdown .*succeeded/) or
+      ($line =~ /^dhcpd startup .*succeeded/) or
+      ($line =~ /^Sending on/) or
+      ($line =~ /^Dynamic and static leases present for/) or
+      # backup server pool balancing
+      ($line =~ /^balanc(?:ed|ing) pool/) or
+      # apparently these are normal with dynamic update and balancing
+      #[TD] dhcpd: bind update on 192.168.148.197 from subnet148 rejected: ...
+      ($line =~ /rejected: incoming update is less critical than outgoing update/) or
+      # Remove host declaration host_name or remove 10.0.0.199
+      ($line =~ /^from the dynamic address pool for/) or
+      ($line =~ /^parse_option_buffer: option [\w-]+ \(\d+\) larger than buffer/) or
+      ($line =~ /^BOOTREQUEST/) or
+      ($line =~ /^DHCPACK/) or
+      ($line =~ /^DHCPNAK/) or
+      ($line =~ /^DHCPINFORM/) or
+      ($line =~ /^DHCPDISCOVER from .* via \S+$/) or
+      ($line =~ /^DHCPREQUEST/) or
+      ($line =~ /^DHCPRELEASE/) or
+      ($line =~ /^Abandoning IP address/) or
+      ($line =~ /^Unable to add (forward|reverse) map/) or
+      ($line =~ /^Can\'t update (forward|reverse) map/) or
+      ($line =~ /^Not searching LDAP since ldap-server, ldap-port and ldap-base-dn were not specified in the config file/) or
+      ($line =~ /^Solicit message from/) or
+      ($line =~ /^Sending Advertise to/) or
+      ($line =~ /^pool [0-9a-f]+ /)
+      ) {
+      # Ignore these lines
+   } elsif ($line =~ s/Listening on\s+//) {
+      $data{'DHCP Server Listening On'}{$line}++;
+   } elsif (
+      ($line =~ /^you want, please write a subnet declaration/) or
+      ($line =~ /^in your dhcpd.conf file for the network segment/) or
+      ($line =~ /^to which interface [a-z\d]+ is attached./) or
+
+      ($line =~ /^If you did not get this software from ftp.isc.org, please/) or
+      ($line =~ /^get the latest from ftp.isc.org and install that before/) or
+      ($line =~ /^requesting help./) or
+
+      ($line =~ /^If you did get this software from ftp.isc.org and have not/) or
+      ($line =~ /^yet read the README, please read it before requesting help./) or
+
+      ($line =~ /^If you intend to request help from the dhcp-server\@isc.org/) or
+      ($line =~ /^mailing list, please read the section on the README about/) or
+      ($line =~ /^help directly to the authors of this software - please/) or
+      ($line =~ /^submitting bug reports and requests for help./) or
+
+      ($line =~ /^Please do not under any circumstances send requests for/) or
+      ($line =~ /^help directly to the authors of this software - please/) or
+      ($line =~ /^send them to the appropriate mailing list as described in/) or
+      ($line =~ /^the README file./)
+      ) {
+    # Do nothing
+   } elsif (
+      # If this DHCP server is authoritative for that subnet
+      ($line =~ /^please write an `authoritative;' directive either in the/) or
+      ($line =~ /^subnet declaration or in some scope that encloses the/) or
+      ($line =~ /^subnet declaration - for example, write it at the top/) or
+      ($line =~ /^of the dhcpd.conf file\./)
+     ) {
+    # Do nothing
+
+   } elsif ($line =~ s/^exiting./DHCP server exiting./) {
+      $data{'Generic error'}{$line}++;
+   } elsif ($line =~ /^There's already a DHCP server running./) {
+      $data{'Generic error'}{$line}++;
+   } elsif ($line =~ s/^\*\* Ignoring requests on ([a-z\d]+).  If this is not what\s*$/Ignoring interface $1/) {
+      $data{'Config error'}{$line}++;
+   } elsif ($line =~ s/^No subnet6? declaration for ([a-z\d]+) ([\(\)\d\.ia-fA-F:]+).\s*$/No subnet declaration for $1 $2/) {
+      $data{'Config error'}{$line}++;
+   } elsif ($line =~ /^If this DHCP server is authoritative for that subnet,$/) {
+      $data{'Config error'}{'missing authoritative directive'}++; 
+   } elsif ($line =~ s/^WARNING: (Host declarations are global).\s+.*$/\1/) {
+      $data{'Config error'}{$line}++;
+   } elsif ($line =~ s/Not searching LDAP\s+.*$/No support for LDAP configured/) {
+      $data{'Config error'}{$line}++;
+   } elsif ($line =~ s/^DHCPOFFER on ([\d\.]+) to ([a-f\d:]+) via (\S+)\s*$/$1 -> $2 ($3)/) {
+      if ($Detail >= 5) {
+         $data{'Addresses Leased'}{$line}++;
+      }
+   } elsif ($line =~ s/^DHCPOFFER on ([\d\.]+) to ([a-f\d:]+) \(([^)]+)\) via (\S+)\s*$/$1 -> $2 [$3] ($4)/) {
+      if ($Detail >= 5) {
+         $data{'Addresses Leased'}{$line}++;
+      }
+   } elsif ($line =~ s/^DHCPOFFER on ([\d\.]+) to ("")(?: \(([^)]+)\))? via (\S+)\s*$/$1 -> $2 [$3] ($4)/) {
+      if ($Detail >= 5) {
+         $data{'Warnings'}{$line}++;
+      }
+   } elsif ($line =~ s/^DHCPDECLINE of ([\d\.]+) from ([\w:]+) \(([^)]+)\) via ([\d\.]+).*$/$1 -> $2 [$3] ($4)/) {
+      if ($Detail >= 5) {
+         $data{'Addresses Declined'}{$line}++;
+      }
+   } elsif ( ($line =~ s/^BOOTREPLY for ([\d\.]+) to ([a-zA-Z\d_-]+) \(([a-f\d:]+)\) via (\S+)\s*$/$1 -> $3 [$2] ($4\/bootp)/)
+      or ($line =~ s/^BOOTREPLY on ([\d\.]+) to ([a-f\d:]+) via (\S+)\s*$/$1 -> $2 [] ($3\/bootp)/) ) {
+
+      if ($Detail >= 5) {
+         $data{'Addresses Leased'}{$line}++;
+      }
+   } elsif ($line =~ /^(Request|Confirm|Rebind|Renew|Release) message from ([0-9a-fA-F:]+)/) {
+      $clientrequest{$2} = $1;
+   } elsif ($line =~ s/^Sending Reply to ([0-9a-fA-F:]+) port \d+/$1 (IPv6)/) {
+      my $clientrequest = $clientrequest{$1};
+      undef($clientrequest{$1});
+      if (($Detail >= 5) and ($clientrequest eq 'Request')) {
+         $data{'Addresses Leased'}{$line}++;
+      } elsif (($Detail >= 10) and ($clientrequest =~ /Rebind|Renew/)) {
+         $data{"Addresses $clientrequest"}{$line}++;
+      }
+   } elsif ($line =~ /^Client ([0-9a-fA-F:]+) releases address ([0-9a-fA-F:]+), which is not leased to it.$/) {
+      if ($Detail >= 5) {
+         $data{'Warnings'}{$line}++;
+      }
+   } elsif ($line =~ s/^Client ([0-9a-fA-F:]+) releases address ([0-9a-fA-F:]+)$/$1\n      -> $2 (IPv6)/) {
+      if ($Detail >= 5) {
+         $data{'Addresses Released'}{$line}++;
+      }
+   } elsif ($line =~ s/^added reverse map from ([\d]+).([\d]+).([\d]+).([\d]+).in-addr.arpa. to ([a-zA-Z\d._-]+)\s*$/Add reverse $4.$3.$2.$1 -> $5/) {
+      if ($Detail >= 7) {
+         $data{'DNS Mappings'}{$line}++;
+      }
+   } elsif ($line =~ s/^removed reverse map on ([\d]+).([\d]+).([\d]+).([\d]+).in-addr.arpa.\s*$/Remove reverse $4.$3.$2.$1/) {
+      if ($Detail >= 7) {
+         $data{'DNS Mappings'}{$line}++;
+      }
+   } elsif ($line =~ s/^Added new forward map from ([a-zA-Z\d\-_.]+) to ([\d.]+)\s*$/Add forward $1 -> $2/) {
+      if ($Detail >= 7) {
+         $data{'DNS Mappings'}{$line}++;
+      }
+   } elsif ($line =~ s/^if ([a-zA-Z\d\-_.]+) IN A rrset doesn't exist delete ([a-zA-Z\d\-_.]+) IN TXT "([a-f\d]+)": success.\s*$/Remove forward TXT from $1 (TXT "$3")/) {
+      if ($Detail >= 7) {
+         $data{'DNS Mappings'}{$line}++;
+      }
+   } elsif ($line =~ s/^if ([a-zA-Z\d\-_.]+) IN TXT "([a-f\d]+)" rrset exists and ([a-zA-Z\d\-_.]+) IN A ([\d.]+) rrset exists delete ([a-zA-Z\d\-_.]+) IN A ([\d.]+): success.\s*$/Remove forward $1 -> $4 (TXT "$2")/) {
+      if ($Detail >= 7) {
+         $data{'DNS Mappings'}{$line}++;
+      }
+   } elsif ($line =~ /^.* rrset .*/) {
+      if ($Detail >= 7) {
+         $data{'DNS Mappings'}{$line}++;
+      }
+   } elsif ($line =~ s/^Remove host declaration ([a-zA-Z\d.-]+) or remove ([\d.]+)\s*$/Host $2 ($1) has static and dynamic mappings, remove other/) {
+      if ($Detail >= 3) {
+         $data{'Warnings'}{$line}++;
+      }
+   } elsif ($line =~ s/^uid lease ([\da-fA-F\.:]+) for client ([^ ]*) is duplicate on ([^ ]*)/uid lease $1 for client $2 is duplicate/) {
+      if ($Detail >= 3) {
+         $data{'Duplicate lease'}{$line}++;
+      }
+   } elsif ($line =~ /^DHCPDISCOVER from .* via \S+: (.*): no free leases/) {
+      $data{'No Free Leases'}{$1}++;
+   } elsif ($line =~ /^DHCPDISCOVER from .* via (\S+): unknown network segment/) {
+      $data{'Unknown Network Segments'}{$1}++;
+   } elsif ($line =~ /^ICMP Echo Reply for ([\da-fA-F\.:]+) late or spurious/) {
+      $data{'Late or spurious Echo Reply for'}{$1}++;
+   } elsif ($line =~ /^ICMP Echo reply while lease ([\da-fA-F\.:]+) valid/) {
+      $data{'Echo reply while lease valid'}{$1}++;
+   } else {
+      $data{'Unknown Entries'}{$line}++;
+   }
+}
+
+if (keys %data) {
+   foreach my $type (sort keys %data) {
+      print "$type:\n";
+      foreach my $entry (sort {$a cmp $b} keys %{$data{$type}}) {
+         print "   $entry: $data{$type}{$entry} Time(s)\n";
+      }
+      print "\n";
+   }
+}
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

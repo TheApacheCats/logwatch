@@ -1,0 +1,123 @@
+
+##########################################################################
+# $Id: up2date,v 1.20 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Eric Moret <eric.moret@epita.fr>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to eric.moret@epita.fr.
+########################################################
+
+#######################################################
+## Copyright (c) 2008 Eric Moret
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+#$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+if ( $Debug >= 5 ) {
+   print STDERR "\n\nDEBUG: Inside up2date Filter \n\n";
+   $DebugCounter = 1;
+}
+
+while (defined($ThisLine = <STDIN>)) {
+   if ( $Debug >= 5 ) {
+      print STDERR "DEBUG($DebugCounter): $ThisLine";
+      $DebugCounter++;
+   }
+   if ( ( $ThisLine =~ /^updating login info$/ ) or
+        ( $ThisLine =~ /^updateLoginInfo\(\) login info$/ ) or
+        ( $ThisLine =~ /^Opening rpmdb in \/var\/lib\/rpm\/ with option .$/ ) or
+        ( $ThisLine =~ /^successfully retrieved authentication token from up2date server$/ ) or
+        ( $ThisLine =~ /^(getA|a)vailablePackageList from network$/ ) or
+        ( $ThisLine =~ /^getAdvisoryInfo for / ) or
+        ( $ThisLine =~ /^logging into up2date server$/ ) or
+        ( $ThisLine =~ /^A socket error occurred/ ) or
+        ( $ThisLine =~ /^new up2date run started/ ) or
+        ( $ThisLine =~ /^Creating rollback packages\.\.\./ ) or
+        ( $ThisLine =~ /^Updating transaction list/ ) or
+        ( $ThisLine =~ /^A protocol error occurred/ ) or
+        ( $ThisLine =~ /^Error communicating with server\.\s+The message was:$/ ) or
+        ( $ThisLine =~ /^Updating package profile/) or
+        ( $ThisLine =~ /^Unable to import repomd/) or
+        ( $ThisLine =~ /^deleting \/var\/spool\/up2date\// ) or
+	( $ThisLine =~ /^solving dep for: \[('.*')*\]/) or
+	( $ThisLine =~ /^Adding [^ ]* to bootloader config/) or
+	( $ThisLine =~ /^Modifying bootloader config to include the new kernel info/) or
+	( $ThisLine =~ /rhn_register $/) or
+	( $ThisLine =~ /rhn_register Registered login info/) or
+	( $ThisLine =~ /rhn_register Wrote system id to disk/) or
+	( $ThisLine =~ /rhn_register Sent package list./) or
+	( $ThisLine =~ /rhn_register updating login info/) or
+	( $ThisLine =~ /rhn_register Sent hardware profile./) or
+	( $ThisLine =~ /rhn_register logging into up2date server/) or
+	( $ThisLine =~ /rhn_register successfully retrieved authentication token from up2date server/) or
+	( $ThisLine =~ /rhn_register An exception was raised causing login to fail. This is usually correct. Exception information:/) or
+	( $ThisLine =~ /^Running elilo with the new configuration/) ) {
+
+      # We don't care about these
+   } elsif ( $ThisLine =~ s/^installing packages: ([^ ]+)/$1/ ) {
+      $PackageInstalled{$ThisLine}++;
+   } elsif ( $ThisLine =~ s/^Adding packages to package profile: ([^ ]+)/$1/ ) {
+      $PackageAddedToProfile{$ThisLine}++;
+   } elsif ( $ThisLine =~ s/^Removing packages from package profile: ([^ ]+)/$1/ ) {
+      $PackageRemovedFromProfile{$ThisLine}++;
+   } elsif ( $ThisLine =~ /rhn_register Registered system./) {
+      $RHNRegistration++;
+   } else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if (keys %PackageInstalled) {
+   print "\nPackage Installed:\n";
+   foreach $ThisOne (keys %PackageInstalled) {
+      print "   " . $ThisOne;
+   }
+}
+if (keys %PackageAddedToProfile) {
+   print "\nPackage Added To Profile:\n";
+   foreach $ThisOne (keys %PackageAddedToProfile) {
+      print "   " . $ThisOne;
+   }
+}
+if (keys %PackageRemovedFromProfile) {
+   print "\nPackage Removed From Profile:\n";
+   foreach $ThisOne (keys %PackageRemovedFromProfile) {
+       print "   ". $ThisOne;
+   }
+}
+
+if ($RHNRegistration) {
+   print "\nSystem registred to rhn " . $RHNRegistration . " time(s)\n";
+}
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

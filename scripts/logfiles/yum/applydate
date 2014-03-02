@@ -1,0 +1,50 @@
+##########################################################################
+# $Id: applydate,v 1.4 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use POSIX qw(strftime);
+use Logwatch ':dates';
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+
+my $time = time;
+
+# Two formats in use: SearchNewDate is for yum 2.1 and later, I believe
+$SearchDate = TimeFilter('%m/%d/%y %H:%M:%S');
+$SearchNewDate = TimeFilter('%b %d %H:%M:%S');
+
+if ( $Debug > 5 ) {
+   print STDERR "DEBUG: Inside ApplyDate (yum)...\n";
+   print STDERR "DEBUG: Looking For: " . $SearchDate . " or " . $SearchNewDate . "\n";
+}
+
+while (defined($ThisLine = <STDIN>)) {
+    # Here we actually remove the dates, as well
+    if ($ThisLine =~ s/^$SearchNewDate //o ||
+        $ThisLine =~ s/$SearchDate //o) {
+      print $ThisLine;
+    }
+}
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

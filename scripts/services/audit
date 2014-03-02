@@ -1,0 +1,278 @@
+
+##########################################################################
+# $Id: audit,v 1.15 2009/02/20 17:59:47 mike Exp $
+##########################################################################
+# $Log: audit,v $
+# Revision 1.15  2009/02/20 17:59:47  mike
+# Patch from Ivan Varekova -mgt
+#
+# Revision 1.14  2008/05/04 14:15:39  mike
+# Parsing of logw lines fedora bug #440534 -mgt
+#
+# Revision 1.13  2008/03/25 14:41:58  kirk
+# updated copyright to Ron Kuris
+#
+# Revision 1.12  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.11  2007/07/18 18:22:45  bjorn
+# Additional filtering, by Ivana Varekova.
+#
+# Revision 1.10  2007/02/16 03:25:17  bjorn
+# Don't test for selinux, and filter "Started dispatcher", by Ivana Varekova.
+#
+# Revision 1.9  2006/12/20 15:25:09  bjorn
+# Additional filtering, by Ivana Varekova.
+#
+# Revision 1.8  2006/09/15 15:40:58  bjorn
+# Additional filtering by Ivana Varekova.
+#
+# Revision 1.7  2006/08/23 22:54:04  bjorn
+# Filtering additional informational messages, by Marcela Maslanova.
+#
+# Revision 1.6  2006/03/20 20:42:57  bjorn
+# Additional filtering, by Ivana Varekova.
+#
+# Revision 1.5  2005/12/06 02:36:35  bjorn
+# Report low disk space, by Ivana Varekova.
+#
+# Revision 1.4  2005/10/26 05:52:12  bjorn
+# Filtering modifications by Ivana Varekova
+#
+# Revision 1.3  2005/10/01 19:09:07  bjorn
+# Extensive modifications by Ivana Varekova
+#
+# Revision 1.2  2005/06/07 18:43:32  bjorn
+# Limiting number of unmatched statement
+#
+# Revision 1.1  2005/05/04 15:56:13  bjorn
+# Audit (for selinux) submitted by Ron Kuris
+#
+##########################################################################
+########################################################
+# selinux audit log summaries
+#
+# This was written and is maintained by:
+#    Ron Kuris <swcafe@gmail.com>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to logwatch-devel@lists.sourceforge.net
+########################################################
+
+########################################################
+## (c) 2006,2008 Ron Kuris <swcafe@gmail.com>
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use strict;
+use Logwatch ':all';
+
+my (%denials, %grants);
+my @OtherList;
+my $othercount = 0;
+my $Debug = ($ENV{'LOGWATCH_DEBUG'} || 0);
+my $Detail = ($ENV{'LOGWATCH_DETAIL_LEVEL'} || 0);
+my $NumberOfInits = 0;
+my $NumberOfDStarts = 0;
+my $NumberOfDStartsPid = 0;
+my $NumberOfDStops = 0;
+my $NumberOfDdStarts = 0;
+my $NumberOfDdStops = 0;
+my $NumberOfLostMessages = 0;
+my %InvalidContext = ();
+my %BugLog = ();
+my $UELimit = 10;
+my $ThisLine;
+my %Warning = ();
+
+print STDERR "\n\nDEBUG: Inside audit filter\n\n" if ( $Debug >= 5 );
+
+while ($ThisLine = <STDIN>) {
+    chomp($ThisLine);
+    # Remove timestamp if present
+    $ThisLine =~ s/^\[\s*\d+\.\d+\]\s*//;
+    if (( $ThisLine =~ /initializing netlink socket \(disabled\)/) or
+	( $ThisLine =~ /audit_pid=[0-9]* old=[0-9]*(?: by auid=[0-9]*)?/) or
+	( $ThisLine =~ /(arch=[0-9]+ )?syscall=[0-9]+ (success=(no|yes) )?exit=[0-9-]+( a[0-3]=[0-9a-f]+)* items=[0-9]+ (ppid=[0-9]+ )?pid=[0-9]+ (loginuid=[0-9-]+ )?(auid=[0-9]+ )?uid=[0-9]+ gid=[0-9]+ euid=[0-9]+ suid=[0-9]+ fsuid=[0-9]+ egid=[0-9]+ sgid=[0-9]+ fsgid=[0-9]+/) or
+	( $ThisLine =~ /Audit daemon rotating log files/) or
+	( $ThisLine =~ /audit_backlog_limit=[0-9]* old=[0-9]*(?: by auid=[0-9]*)?/) or
+	( $ThisLine =~ /SELinux:  unrecognized netlink message type=[0-9]+ for sclass=[0-9]+/) or
+	( $ThisLine =~ /audit\([0-9.]+:[0-9]+\): saddr=[0-9]+/) or
+	( $ThisLine =~ /nargs=[0-9]+ a0=[0-9a-f]+ a1=[0-9a-f]+ a2=[0-9a-f]+ a3=[0-9a-f]+ a4=[0-9a-f]+ a5=[0-9a-f]+/) or
+	( $ThisLine =~ /^audit\([0-9.]+:[0-9]+\): ( ?(path|cwd|item|name|flags)=["\/A-Za-z0-9]*)*$/) or
+	( $ThisLine =~ /: enforcing=[0-9]+ old_enforcing=[0-9]+ auid=[0-9]+/) or
+	( $ThisLine =~ /: policy loaded auid=[0-9]+/) or
+	( $ThisLine =~ /: user pid=[0-9]+ uid=[0-9]+ auid=[0-9]+ subj=system_u:system_r:system_dbusd_t:[0-9a-z:.\-]+ msg=/) or
+	( $ThisLine =~ /audit\([0-9.]+:[0-9]+\): (selinux=[0-9]+|auid=[0-9]+|prom=[0-9]+|old_prom=[0-9]+|dev=[^ ]+| )+$/) or
+        ( $ThisLine =~ /auditd[ ]+S [0-9A-F]+  [0-9]+  [0-9]+[ ]+[0-9]([ ]*[0-9]+[ ]*|[ ]*)[0-9]+  [0-9]+ \(NOTLB\)/) or
+        ( $ThisLine =~ /Started dispatcher: \/sbin\/audispd pid: [0-9]+/) or
+        ( $ThisLine =~ /audit\([0-9.]*:[0-9]*\): bool=.* val=.* old_val=.* auid=[0-9]*/) or
+	( $ThisLine =~ /item=[0-9] name="\S*" inode=[0-9]+ dev=\S* mode=[0-9]* ouid=[0-9]* ogid=[0-9]* rdev=[0-9:]* obj=\S*/)
+    ) {
+	# Ignore these entries
+    } elsif ( $ThisLine =~ /audit\([0-9]{10}.[0-9]{3}:[0-9]\): initialized$/) {
+      $NumberOfInits++;
+    } elsif ( $ThisLine =~ /Init complete, audit pid set to: [0-9]+/) {
+      $NumberOfDStartsPid++;
+    } elsif ( $ThisLine =~ /Init complete, auditd [0-9,.]+ listening for events/) {
+      $NumberOfDStarts++;
+    } elsif ( $ThisLine =~ /The audit daemon is exiting./) {
+      $NumberOfDStops++;
+    } elsif ( $ThisLine =~ /audit_lost=[0-9]+ audit_backlog=[0-9]+ audit_rate_limit=[0-9]+ audit_backlog_limit=[0-9]+$/) {
+      $NumberOfLostMessages++;
+    } elsif ( $ThisLine =~ /auditd startup succeeded/) {
+      $NumberOfDdStarts++;
+    } elsif ( $ThisLine =~ /auditd shutdown succeeded/) {
+      $NumberOfDdStops++;
+    } elsif (( $ThisLine =~ /netlink socket too busy/) or
+             ( $ThisLine =~ /Error sending signal_info request \(Invalid argument\)/) or
+	     ( $ThisLine =~ /major=[0-9]+ name_count=[0-9]+: freeing multiple contexts \([1-2]\)/)) {
+      $ThisLine =~ s/audit\(:[0-9]+\): //;
+      $BugLog{$ThisLine}++;
+    } elsif (( $ThisLine =~ /Audit daemon is low on disk space for logging/)  or
+             ( $ThisLine =~ /Audit daemon is suspending logging due to low disk space./)) {
+      $Warning{$ThisLine}++;
+    } elsif ( $Detail > 9 ) {
+	if ( $ThisLine =~ /avc:\s*denied\s*{\s*([^}]+).*scontext=(\S+)\s*tcontext=(\S+)\s*tclass=(\S+)/ ) {
+	    $denials{$2.' '.$3.' ('.$1.$4 . ')'}++;
+	} elsif ( $ThisLine =~ /avc:\s*granted\s*{\s*([^}]+).*scontext=(\S+)\s*tcontext=(\S+)\s*tclass=(\S+)/ ) {
+	    $grants{$2.' '.$3.' ('.$1.$4 . ')'}++;
+	} elsif ($ThisLine =~ /security_compute_sid:\s*invalid context\s*(\S+)\s*for\s*scontext=(\S+)\s*tcontext=(\S+)\s*tclass=(\S+)/ ) {
+	    $InvalidContext{$4." running as ".$2." acting on ".$3." \nshould transit to invalid ".$1}++;
+        } elsif ($ThisLine =~ /security_sid_mls_copy:\s*invalid context\s*(\S+)/) {
+            $InvalidContext{"context: ".$1}++;
+	} else {
+            $othercount++;
+            $ThisLine =~ s/^\s*//;
+            if ($othercount < $UELimit+1) {
+	       push @OtherList, $ThisLine;
+            }
+	}
+    } elsif ( $Detail > 4 ) {
+	if ( $ThisLine =~ /avc:\s*denied\s*{\s*[^}]+.*scontext=(\S+)\s*tcontext=(\S+)\s*tclass=(\S+)/ ) {
+	    $denials{$1.' '.$2.' ('.$3 . ')'}++;
+	} elsif ( $ThisLine =~ /avc:\s*granted\s*{\s*[^}]+}.*scontext=(\S+)\s*tcontext=(\S+)\s*tclass=(\S+)/ ) {
+	    $grants{$1.' '.$2.' ('.$3 . ')'}++;
+	} elsif ($ThisLine =~ /security_compute_sid:\s*invalid context\s*(\S+)\s*for\s*scontext=(\S+)\s*tcontext=\S+\s*tclass=(\S+)/ ) {
+	    $InvalidContext{$3." running as ".$2." should transit to invalid ".$1}++;
+        } elsif ($ThisLine =~ /security_sid_mls_copy:\s*invalid context\s*(\S+)/) {
+            $InvalidContext{"context: ".$1}++;
+	} else {
+            $othercount++;
+            $ThisLine =~ s/^\s*//;
+            if ($othercount < $UELimit+1) {
+	       push @OtherList, $ThisLine;
+            }
+	}
+    } else {
+	if ( $ThisLine =~ /avc:\s*denied\s*{\s*[^}]+.*scontext=([^:]+):[^:]+:\S+\s*tcontext=([^:]+):[^:]+:\S+\s*tclass=(\S+)/ ) {
+	    $denials{$1.' '.$2.' ('.$3 . ')'}++;
+	} elsif ( $ThisLine =~ /avc:\s*granted\s*{\s*[^}]+.*scontext=([^:]+):[^:]+:\S+\s*tcontext=([^:]+):[^:]+:\S+\s*tclass=(\S+)/ ) {
+	    $grants{$1.' '.$2.' ('.$3 . ')'}++;
+	} elsif ($ThisLine =~ /security_compute_sid:\s*invalid context\s*(\S+)\s*for\s*scontext=(\S+)\s*tcontext=\S+\s*tclass=(\S+)/ ) {
+   	    $InvalidContext{$3." running as ".$2." should transit to invalid ".$1}++;
+        } elsif ($ThisLine =~ /security_sid_mls_copy:\s*invalid context\s*(\S+)/) {
+            $InvalidContext{"context: ".$1}++;
+	} else {
+            $othercount++;
+            $ThisLine =~ s/^\s*//;
+            if ($othercount < $UELimit+1) {
+	       push @OtherList, $ThisLine;
+            }
+	}
+    }
+}
+
+if ( %Warning) {
+   foreach my $key (keys %Warning) {
+      print "   Warning: $key: ". $Warning{$key}. " times\n";
+   }
+}
+
+if ( keys %denials ) {
+    print "\n\n*** Denials ***\n";
+    foreach my $key (sort keys %denials) {
+    	print "   $key: ". $denials{$key} . " times\n";
+    }
+}
+
+if ( keys %grants ) {
+    print "\n\n*** Grants ***\n";
+    foreach my $key (sort keys %grants) {
+    	print "   $key: ". $grants{$key} . " times\n";
+    }
+}
+
+if ( keys %InvalidContext) {
+    print "\n\n*** Invalid Context ***\n";
+    foreach my $key (sort keys %InvalidContext) {
+        print "   $key: ". $InvalidContext{$key} . " times\n";
+    }
+}
+
+
+
+if ($Detail and $NumberOfDStarts+$NumberOfDStartsPid) {
+    print "\n Number of audit daemon starts: ",$NumberOfDStarts+$NumberOfDStartsPid," \n";
+}
+
+if (($Detail >9) and ($NumberOfDStartsPid)) {
+    print "        starts with pid change: $NumberOfDStartsPid \n"
+}
+
+if ($Detail and $NumberOfDStops)  {
+    print "\n Number of audit daemon stops: $NumberOfDStops \n";
+}
+
+if ($NumberOfLostMessages) {
+    print "\n Number of lost messages: $NumberOfLostMessages\n";
+}
+
+if ($Detail>9) {
+    if ($NumberOfInits) {
+        print "\n Number of audit initializations: $NumberOfInits \n";
+    }
+    if ($NumberOfDdStarts) {
+      print "\n Number of auditd daemon starts: $NumberOfDdStarts \n";
+    }
+    if ($NumberOfDdStops) {
+      print "\n Number of auditd daemon stops: $NumberOfDdStops \n";
+    }
+}
+
+if ( %BugLog) {
+  print "\n*** Logs which could mean a bug ***\n";
+  foreach my $Entry (keys %BugLog) {
+    print "   $Entry\n";
+  }
+}
+
+if ( $#OtherList >= 0 ) {
+    print "\n**Unmatched Entries** ";
+    if ($othercount > $UELimit) {
+       print "(Only first $UELimit out of $othercount are printed)";
+    }
+    print "\n ";
+    print join("\n ", @OtherList);
+    print "\n";
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

@@ -1,0 +1,131 @@
+
+##########################################################################
+# $Id: ipop3d,v 1.14 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# Revision 0.3 2002/06/16 Kirk Bauer <kirk@kaybee.org>
+# - Only outputs separator lines if there are logs on which to report
+# Revision 0.2 2002/05/29 Pawel Jarosz <pj@rsi.pl>
+# - More flexible output
+# Revision 0.1 2002/05/27 Pawel Jarosz <pj@rsi.pl>
+# - Removed unneded things
+# - New lookout, more sorted data
+##########################################################################
+
+#####################################################
+## Copyright (c) 2008 Pawel Jarosz
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my %Conn_loginok;
+my %Conn_loginfail;
+my %Connections;
+my %OtherList;
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   #Solaris ID filter -mgt
+   $ThisLine =~ s/\[ID [0-9]+ [a-z]+\.[a-z]+\] //;
+#   next unless ( $ThisLine=~s/^... .. ..:..:.. [^ ]+ ipop3d\[\d+\]: //); #For testing only
+   next unless (defined($ThisLine));
+
+   if ( $ThisLine =~/^Command stream end of file/ ) {
+      next;
+   }
+
+   if ( $ThisLine =~/^(Autol|L)ogout/ ) {
+      next;
+   }
+
+   if ( $ThisLine =~/^Trying to get mailbox lock/ ) {
+      next;
+   }
+
+   if ( $ThisLine =~/^Connection reset by peer/ ) {
+      next;
+   }
+
+   if ( $ThisLine =~/^Error opening or locking/ ) {
+      next;
+   }
+
+   if ( $ThisLine =~/^Login failure user=(\S+) host=[\w\. 0-9\-]*\[(\d+.\d+.\d+.\d+)\]/ ||
+         $ThisLine =~/^Login failed user=(\S+) auth=\S+ host=[\w\. 0-9\-]*\[(\d+.\d+.\d+.\d+)\]/ ||
+         $ThisLine =~/^Login excessive login failures user=(\S+) auth=\S+ host=[\w\. 0-9\-]*\[(\d+.\d+.\d+.\d+)\]/ ) {
+      $Conn_loginfail{$1}{$2}++;
+      next;
+   }
+
+   if ( $ThisLine =~/service init from (\d+.\d+.\d+.\d+)$/ ) {
+      $Connections{$1}++;
+      next;
+   }
+
+   if ( $ThisLine =~/^(Login|Auth|APOP|Update) user=(\S+) host=[^\[]*\[(\d+.\d+.\d+.\d+)\]/ ) {
+      $Conn_loginok{$2}{$3}++;
+      next;
+   }
+
+   if ( $ThisLine =~/^AUTHENTICATE (\S+) failure host=[\w\. 0-9\-]*\[(\d+.\d+.\d+.\d+)\]/ ) {
+      $Conn_loginfail{$1}{$2}++;
+      next;
+   }
+
+   # Report any unmatched entries...
+   $OtherList{$ThisLine}++;
+}
+
+if ( (keys %Connections) and ($Detail >= 15) ) {
+   print "\nInitialized Connections:\n";
+   foreach $ThisOne (sort {$Connections{$b}<=>$Connections{$a}} keys %Connections) {
+      printf "   %4i from %s\n" , $Connections{$ThisOne} , $ThisOne;
+   }
+}
+
+if ( (keys %Conn_loginfail) and ($Detail >= 5) ) {
+   print "\nFailed to log in:\n";
+   foreach my $user (keys %Conn_loginfail) {
+      print "User: $user from:\n";
+      foreach my $host ( sort keys %{ $Conn_loginfail{$user} } ) {
+         printf "           %-35s %4i\n",$host,$Conn_loginfail{$user}{$host};
+      }
+   }
+}
+
+if ( (keys %Conn_loginok) and ($Detail >=15) ) {
+   print "\nSuccess in log in:\n";
+   foreach my $user (keys %Conn_loginok) {
+      print "User: $user from:\n";
+      foreach my $host ( sort keys %{ $Conn_loginok{$user} } ) {
+         printf "           %-35s %4i\n",$host,$Conn_loginok{$user}{$host};
+      }
+   }
+}
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach my $line (sort {$OtherList{$b}<=>$OtherList{$a} } keys %OtherList) {
+      print "   $line: $OtherList{$line} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

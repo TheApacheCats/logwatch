@@ -1,0 +1,120 @@
+
+##########################################################################
+# $Id: modprobe,v 1.15 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+# $Log: modprobe,v $
+# Revision 1.15  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.14  2005/02/24 17:08:04  kirk
+# Applying consolidated patches from Mike Tremaine
+#
+# Revision 1.5  2005/02/16 00:43:28  mgt
+# Added #vi tag to everything, updated ignore.conf with comments, added emerge and netopia to the tree from Laurent -mgt
+#
+# Revision 1.4  2004/07/29 19:33:29  mgt
+# Chmod and removed perl call -mgt
+#
+# Revision 1.3  2004/07/10 01:54:34  mgt
+# sync with kirk -mgt
+#
+# Revision 1.11  2004/02/03 03:36:39  kirk
+# Patches from Anssi Kolehmainen <kolean-5.listat@pp.inet.fi>
+#
+# Revision 1.10  2004/02/03 02:45:26  kirk
+# Tons of patches, and new 'oidentd' and 'shaperd' filters from
+# Pawe? Go?aszewski" <blues@ds.pg.gda.pl>
+#
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Kirk Bauer <kirk@kaybee.org>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to kirk@kaybee.org.
+########################################################
+
+#####################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+#$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   if ( $ThisLine =~ s/^modprobe: Can\'t locate module ([\w-]+)\s*$/$1/ ) {
+      $Modules{$ThisLine}++;
+   } elsif ( $ThisLine =~ s/^FATAL: Module (.*) not found./$1/) {
+      $Modules{$ThisLine}++;
+   } elsif ( $ThisLine =~ s/^FATAL: Could not load (.*): No such file or directory/$1/) {
+      $Modules{$ThisLine}++;
+   } elsif ( (undef,$Module,$Reason) = ( $ThisLine =~ /(WARNING|FATAL): Error inserting ([^ ]* \([^ ]*\)): (.*)$/ ) ) {
+      $ErrorInsert{$Module}{$Reason}++;
+   } elsif ( (undef,$Module) = ( $ThisLine =~ /(WARNING|FATAL): Error running install command for (.*)$/ ) ) {
+      $ErrorInstall{$Module}++;
+   } elsif ( (undef,$Module) = ( $ThisLine =~ /(WARNING|FATAL): Module ([^ ]*) already in kernel./ ) ) {
+      $AlreadyLoaded{$Module}++;
+   } else {
+      $OtherList{$ThisLine}++;
+   }
+}
+
+if (keys %Modules) {
+   print "\nCan't locate these modules:\n";
+   foreach my $ThisOne (sort keys %Modules) {
+      print "   " . $ThisOne . ": " . $Modules{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %ErrorInsert) {
+   print "\nErrors inserting modules:\n";
+   foreach $Module (sort {$a cmp $b} keys %ErrorInsert) {
+      print "   $Module :\n";
+      foreach $Reason (sort {$a cmp $b} keys %{$ErrorInsert{$Module}}) {
+         print "      $Reason : $ErrorInsert{$Module}{$Reason} Time(s)\n";
+      }
+   }
+}
+
+if (keys %ErrorInstall) {
+   print "\nErrors running install command:\n";
+   foreach $Module (sort {$a cmp $b} keys %ErrorInstall) {
+      print "   $Module : $ErrorInstall{$Module} Time(s)\n";
+   }
+}
+
+if (keys %AlreadyLoaded) {
+   print "\nModules already in kernel:\n";
+   foreach $Module (sort {$a cmp $b} keys %AlreadyLoaded) {
+      print "   $Module : $AlreadyLoaded{$Module} Time(s)\n";
+   }
+}
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $line (sort {$a cmp $b} keys %OtherList) {
+      print "$line: $OtherList{$line} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

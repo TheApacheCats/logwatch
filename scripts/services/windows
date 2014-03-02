@@ -1,0 +1,439 @@
+##########################################################################
+# $Id: windows,v 1.4 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: windows,v $
+# Revision 1.4  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.3  2008/03/24 23:31:27  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.2  2007/09/29 20:48:19  bjorn
+# Rewrite and enhancement by Brian Kroth.
+#
+# Revision 1.1  2006/03/22 17:46:22  bjorn
+# Initial commit.  Files submitted by William Roumier.
+#
+##########################################################################
+# This is a logwatch script that looks at a log file composed of windows auth
+# security logs counts the number of times a user failed to login and
+# optionally the number times they succesfully logged in and some other account
+# creation/modification audits.
+#
+# See the following sites for event id documentation:
+# http://www.microsoft.com/technet/prodtechnol/windowsserver2003/technologies/security/bpactlck.mspx
+# http://support.microsoft.com/?id=299475
+# http://support.microsoft.com/?id=301677
+
+#######################################################
+## Copyright (c) 2008 William Roumier
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use lib "/usr/share/logwatch/lib";
+use Logwatch ':all';
+
+my $detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+my ($month, $day, $time, $host, $process, $eventid, $msg);
+
+# Loop through the given input and parse it first to make sure we need to,
+# then to sort it into various categories.
+while (defined($line = <STDIN>)) {
+
+	($month, $day, $time, $host, $process, $eventid, $msg) = split(/\s+/, $line, 7);
+
+	chomp($host);
+	chomp($process);
+	chomp($eventid);
+	chomp($msg);
+
+	if ($process =~ /security\[failure\]/) { # failure events
+
+		# First count the number of failed logins - we always want that.
+		# Events 529 - 537, 539
+		if (($eventid >= 529 && $eventid <= 537) || $eventid == 539 || $eventid == 680) {
+			$msg =~ /(User Name|Logon account):\s*(\S+)\s+.+(Address|Workstation( Name)?):\s*\\{0,2}(\S+)/;
+			# print "DEBUG Logon Failure: name:$2 source:$4\n";
+			$loginFailByAccount{$2}{$5}++;
+			$loginFailByHost{$5}{$2}++;
+		}
+
+		# IKE Failures: Events 544 - 547
+		#elsif ($eventid >= 544 && $eventid <= 547 && $line =~ /some_meaningful_pattern/) {
+		#}
+
+		elsif ($eventid == 547) { # IKE security association negotiation failed
+			$msg =~ /IKE Peer Addr\s+(\S+)\s+.+Failure Reason:\s*(.+)\s+Extra Status:/;
+			#print "DEBUG IKE security association negotiation failed: host:$host peer:$1 reason:$2\n";
+			$ikeSecNegFail{$host}{$1}{$2}++;
+		}
+
+		elsif ($eventid == 644) { # User Account Locked Out
+			$msg =~ /Target Account Name:\s*(\S+)\s+.+Caller User Name:\s*(\S+)/;
+			#print "DEBUG User Account Locked Out: $1 on $2 by $3\n";
+			$lockedOut{$host}{$1}{$2}++;
+		}
+
+		elsif ($eventid == 675 || $eventid == 676 || $eventid == 677) { # Kerberos authentication failed
+			$msg =~ /User Name:\s*(\S+)\s+.+Client Address:\s*(\S+)/;
+			#print "DEBUG Pre-Authentication failed: $1 on $2\n";
+			#$krbAuthFail{$host}{$1}{$2}++;
+			$krbAuthFailByAccount{$1}{$2}++;
+			$krbAuthFailByHost{$2}{$1}++;
+		}
+
+		#elsif ($eventid == 681) { # Logon Failure - not used in Windows 2003/XP
+		#	$msg =~ /The logon to account:\s*(\S+)\s+by:\s*(\S+)\s+from workstation:\s*(\S+)\s+failed/;
+		#	print "DEBUG Logon Failure to $1 by $2 from $3\n";
+		#	$logonFailure{$1}{$2}{$3}++;
+		#}
+
+		elsif ($eventid == 861) { # The Windows Firewall has detected an application listenin for incomming traffic.
+			$msg =~ /Path:\s*(\S+)\s+.+User account:\s*(\S+)\s+.+IP protocol:(\S+)\s+Port number:\s*(\S+)\s+Allowed:\s*(\S+)/;
+			#print "DEBUG Server Application Firewalled: path:$1 account:$2 port:$3 $4 allowed:$5\n";
+			$firewall{$host}{$2}{$1}{$3}{$4}{$5}++;
+		}
+
+		else { # unmatched catch all
+			chomp($msg);
+			$unmatchedFail{$eventid . " " . $msg}++;
+		}
+	}
+
+	elsif ($detail > 3 && $process =~ /security\[success\]/) { # success events
+
+		if ($eventid == 528 || $eventid == 540 || $eventid == 680) { # Successful Logon
+		 	$msg =~ /(User Name|Logon account|Account Name):\s*(\S+)\s+.+(Address|Workstation( Name)?):\s*\\{0,2}(\S+)/;
+			if ($2 !~ /^-|\S+\$$/) { # ignore machines and anonymous
+				#print "DEBUG Logon Success name:$2 source:$5\n";
+				$loginSuccess{$2}{$5}++;
+			}
+		}
+
+		elsif ($eventid == 517) { # Audit log was cleared.
+			$msg =~ /Primary User Name:\s*(\S+)\s+.*Client User Name:\s*(\S+)/;
+			# print "DEBUG Audit log cleared: host:$host primary:$1 client:$2\n";
+			$auditLogCleared{$host}{$1}{$2}++;
+		}
+
+		elsif ($eventid == 608) { # User Right Assigned
+			$msg =~ /User Right:\s*(\S+)\s+Assigned To:\s*(\S+)\s+Assigned By:\s+User Name:\s*(\S+)/;
+			# print "DEBUG Rights Added: right:$1 to:$2 by:$3\n";
+			$rightsAdded{$host}{$3}{$2}{$1}++;
+		}
+		elsif ($eventid == 609) { # User Right Removed
+			$msg =~ /User Right:\s*(\S+)\s+Removed From:\s*(\S+)\s+Removed By:\s+User Name:\s*(\S+)/;
+			# print "DEBUG Rights Removed: right:$1 from:$2 by:$3\n";
+			$rightsRemoved{$host}{$3}{$2}{$1}++;
+		}
+
+		elsif ($eventid == 610) { # New Trusted Domain
+			$msg =~ /New Trusted Domain\s+Domain( Name)?:\s*(\S+)\s+.*Established By:\s+User Name:\s*(\S+)/;
+			# print "DEBUG New Trusted Domain: domain:$2 user:$3 host:$host\n";
+			$newDomainTrust{$host}{$2}{$3}++;
+		}
+		elsif ($eventid == 611) { # Removing Trusted Domain
+			$msg =~ /Removing Trusted Domain\s+Domain( Name)?:\s*(\S+)\s+.*Established By:\s+User Name:\s*(\S+)/;
+			# print "DEBUG New Trusted Domain: domain:$2 user:$3 host:$host\n";
+			$rmDomainTrust{$host}{$2}{$3}++;
+		}
+
+		elsif ($eventid == 612) { # Audit Policy Changed
+			$msg =~ /Changed By:\s+User Name:\s*(\S+)/;
+			# print "DEBUG Audit Policy Changed by $1 on $host\n";
+			$auditPolChange{$host}{$1}++;
+		}
+
+		# Group all account types together - should be clear what's what.
+		elsif ($eventid == 624 || $eventid == 631 || $eventid == 635 || $eventid == 645
+			|| $eventid == 653 || $eventid == 658 || $eventid == 663) { # Account Created
+
+			$msg =~ /New Account Name:\s*(\S+)\s+.*Caller User Name:\s*(\S+)/;
+			#print "DEBUG Account Created: $1 by $2 on $host\n";
+			$newAccount{$host}{$2}{$1}++;
+		}
+		elsif ($eventid == 625) { # User Account Type Change
+			$msg =~ /Target Account Name:\s*(\S+)\s+.+New Type:\s*(\S+)\s*Caller User Name:\s*(\S+)/;
+			# print "DEBUG User Account Type Change: $1 to $2 by $3 on $host\n";
+			$accountTypeChange{$host}{$3}{$1}{$2}++;
+		}
+		elsif ($eventid == 626) { # User Account Enabled
+			$msg =~ /Target Account Name:\s*(\S+)\s+.+Caller User Name:\s*(\S+)/;
+			# print "DEBUG User Account Enabled: $1 by $2 on $host\n";
+			$accountEnabled{$host}{$2}{$1}++;
+		}
+		elsif ($eventid == 627) { # Change Password Attempt
+			$msg =~ /Target Account Name:\s*(\S+)\s+.+Caller User Name:\s*(\S+)/;
+			# print "DEBUG Change Password Attempt: $1 by $2 on $host\n";
+			$changePasswordAttempt{$host}{$2}{$1}++;
+		}
+		elsif ($eventid == 628) { # User Account password set
+			$msg =~ /Target Account Name:\s*(\S+)\s+.+Caller User Name:\s*(\S+)/;
+			# print "DEBUG User Account password set: $1 by $2 on $host\n";
+			$passwordSet{$host}{$2}{$1}++;
+		}
+		elsif ($eventid == 630 || $eventid == 634 || $eventid == 638 || $eventid == 647
+			|| $eventid == 652 || $eventid == 657 || $eventid == 662 || $eventid == 667) { # User Account Deleted
+
+			$msg =~ /Target Account Name:\s*(\S+)\s+.+Caller User Name:\s*(\S+)/;
+			# print "DEBUG Account Deleted: $1 by $2 on $host\n";
+			$accountDeleted{$host}{$2}{$1}++;
+		}
+
+		# Note: This doesn't distinguish between Global and Local Groups
+		elsif ($eventid == 632 || $eventid == 636 || $eventid == 650 || $eventid == 655
+			|| $eventid == 660 || $eventid == 665) { # Group Member Added
+
+			$msg =~ /Member Name:\s*(\S+)\s+.+Target Account Name:\s*(\S+)\s+.+Caller User Name:\s*(\S+)/;
+			# print "DEBUG Group Member Added: $1 to $2 by $3 on $host\n";
+			$groupMemberAdded{$host}{$2}{$3}{$1}++;
+		}
+		elsif ($eventid == 633 || $eventid == 637 || $eventid == 651 || $eventid == 656
+			|| $eventid == 661 || $eventid == 666) { # Group Member Removed
+
+			$msg =~ /Member Name:\s*(\S+)\s+.+Target Account Name:\s*(\S+)\s+.+Caller User Name:\s*(\S+)/;
+			#print "DEBUG Group Member Removed: $1 to $2 by $3 on $host\n";
+			$groupMemberRemoved{$host}{$2}{$3}{$1}++;
+		}
+		elsif ($eventid == 639 || $eventid == 641 || $eventid == 642 || $eventid == 646 || $eventid == 649
+			|| $eventid == 654 || $eventid == 659 || $eventid == 664 || $eventid == 668) { # Account Changed
+
+			$msg =~ /Target Account Name:\s*(\S+)\s+.+Caller User Name:\s*(\S+)/;
+			#print "DEBUG Account Changed: $1 by $2 on $host\n";
+			$accountChanged{$host}{$2}{$1}++;
+		}
+
+		elsif ($eventid == 643) { # Domain Policy Changed
+			$msg =~ /Domain Policy Changed:\s*(.+) modified.+Caller User Name:\s*(\S+)/;
+			#print "DEBUG Domain Policy Changed: $2 on $host to $1\n";
+			$domainPolicyChanged{$host}{$2}{$1}++;
+		}
+
+		elsif ($detail > 5 && $eventid == 672) { # Authentication Ticket Granted
+			$msg =~ /User Name:\s*(\S+)\s+.+Service Name:\s*(\S+)\s+.+Client Address:\s*(\S+)/;
+			#print "DEBUG TGT Granted to $1 for $2 from $3\n";
+			$tgtGranted{$host}{$1}{$2}{$3}++;
+		}
+		elsif ($detail > 5 && $eventid == 673) { # Service Ticket Granted
+			$msg =~ /User Name:\s*(\S+)\s+.+Service Name:\s*(\S+)\s+.+Client Address:\s*(\S+)/;
+			#print "DEBUG SGT Granted to $1 for $2 from $3\n";
+			$sgtGranted{$host}{$1}{$2}{$3}++;
+		}
+		elsif ($detail > 5 && $eventid == 674) { # Ticket Granted Renewed
+			$msg =~ /User Name:\s*(\S+)\s+.+Service Name:\s*(\S+)\s+.+Client Address:\s*(\S+)/;
+			#print "DEBUG Ticket Renewal granted to $1 for $2 from $3\n";
+			$renewed{$host}{$1}{$2}{$3}++;
+		}
+	}
+
+}
+
+
+# Always print login failures grouped by name and host in that order.
+if (keys %loginFailByAccount) {
+	printLevel2("Windows Failed Logins by Account, Host", \%loginFailByAccount);
+}
+if (keys %loginFailByHost) {
+	printLevel2("Windwos Failed Logins by Host, Account", \%loginFailByHost);
+}
+
+if (keys %krbAuthFailByAccount) {
+	printLevel2("Kerberos Authentication Failures by Account, Host", \%krbAuthFailByAccount);
+}
+
+if (keys %krbAuthFailByHost) {
+	printLevel2("Kerberos Authentication Failures by Host, Account", \%krbAuthFailByHost);
+}
+
+if (keys %lockedOut) {
+	printLevel3("Account Locked Out by Host, Target, Caller", \%lockedOut);
+}
+
+if (keys %ikeSecNegFail) {
+	printLevel3("IKE Security Association Negotiation Failed by Host, Peer, Reason", \%ikeSecNegFail);
+}
+
+if (keys %unmatchedFail) {
+	print "\t---- Unmatched Failure Audits ----\n\n";
+	foreach $msg (keys %unmatchedFail) {
+		print "\t" . $unmatchedFail{$msg} . " Time(s):  $msg\n";
+	}
+}
+
+# Start printing some other optional data like login successes, account creation/modification audits, etc.
+if ($detail > 3) {
+	if (keys %loginSuccess) {
+		printLevel2("Windows Successful Logins by Account, Host", \%loginSuccess);
+	}
+
+	if ($detail > 5) {
+		if (keys %tgtGranted) {
+			printLevel4("TGT Granted by Host, Account, Service, Client Addr", \%tgtGranted);
+		}
+		if (keys %sgtGranted) {
+			printLevel4("SGT Granted by Host, Account, Service, Client Addr", \%sgtGranted);
+		}
+		if (keys %renewed) {
+			printLevel4("Ticket Renewed by Host, Account, Service, Client Addr", \%renewed);
+		}
+	}
+
+	if (keys %auditLogCleared) {
+		printLevel3("Audit Log Cleared by Host, Primary Account, Client Account", \%auditLogCleared);
+	}
+
+	if (keys %rightsAdded) {
+		printLevel4("User Rights Added by Host, Modifier, Account, Right", \%rightsAdded);
+	}
+	if (keys %rightsRemoved) {
+		printLevel4("User Rights Removed by Host, Modifier, Account, Right", \%rightsRemoved);
+	}
+
+	if (keys %newDomainTrust) {
+		printLevel3("New Domain Trust by Host, Domain, Modifier", \%newDomainTrust);
+	}
+	if (keys %rmDomainTrust) {
+		printLevel3("Domain Trust Removed by Host, Domain, Modifier", \%rmDomainTrust);
+	}
+
+	if (keys %auditPolChange) {
+		printLevel2("Audit Policy Changed by Host, Modifier", \%auditPolChange);
+	}
+
+	if (keys %newAccount) {
+		printLevel3("New Accounts by Host, Modifier, Account", \%newAccount);
+	}
+	if (keys %accountTypeChange) {
+		printLevel4("Account Type Changed by Host, Modifier, Account, Type", \%accountTypeChange);
+	}
+	if (keys %accountEnabled) {
+		printLevel3("Account Enabled by Host, Modifier, Account", \%accountEnabled);
+	}
+	if (keys %changePasswordAttempt) {
+		printLevel3("Change Password Attempt by Host, Modifier, Account", \%changePasswordAttempt);
+	}
+	if (keys %passwordSet) {
+		printLevel3("Password Set by Host, Modifier, Account", \%passwordSet);
+	}
+	if (keys %accountDeleted) {
+		printLevel3("Account Deleted by Host, Modifier, Account", \%accountDeleted);
+	}
+
+	if (keys %groupMemberAdded) {
+		printLevel4("Group Member Added by Host, Group, Modifier, Account", \%groupMemberAdded);
+	}
+	if (keys %groupMemberRemoved) {
+		printLevel4("Group Member Removed by Host, Group, Modifier, Account", \%groupMemberRemoved);
+	}
+	if (keys %accountChanged) {
+		printLevel3("Account Changed by Host, Modifier, Account", \%accountChanged);
+	}
+
+	if (keys %domainPolicyChanged) {
+		printLevel3("Domain Policy Changed by Host, Modifier, Change", \%domainPolicyChanged);
+	}
+}
+
+
+
+# Prints a hash that's two levels deep in a generic hierarchical manor
+sub printLevel2 {
+	my $msg = $_[0];
+	my %data = %{$_[1]};
+
+	print "\n\t---- $msg ----\n\n";
+	foreach $first (sort(keys %data)) {
+		$total = 0;
+		foreach $second (keys %{$data{$first}}) {
+			$total += $data{$first}{$second};
+		}
+
+		print "\t" . LookupIP($first) . "  $total Time(s)\n";
+		foreach $second (sort(keys %{$data{$first}})) {
+			print  "\t\t" . LookupIP($second) . "  " . $data{$first}{$second} . " Time(s)\n";
+		}
+		print "\n";
+	}
+}
+
+# Prints a hash that's three levels deep in a generic hierarchical manor
+sub printLevel3 {
+	my $msg = $_[0];
+	my %data = %{$_[1]};
+
+	print "\n\t---- $msg ----\n\n";
+	foreach $first (sort(keys %data)) {
+		$first_total = 0;
+		foreach $second (keys %{$data{$first}}) {
+			$second_total{$second} = 0;
+			foreach $third (keys %{$data{$first}{$second}}) {
+				$second_total{$second} += $data{$first}{$second}{$third};
+			}
+			$first_total += $second_total{$second};
+		}
+
+		print "\t" . LookupIP($first) . ":  $first_total Time(s)\n";
+		foreach $second (sort(keys %{$data{$first}})) {
+			print "\t\t" . LookupIP($second) . ":  $second_total{$second} Time(s)\n";
+			foreach $third (sort(keys %{$data{$first}{$second}})) {
+				print "\t\t\t" . LookupIP($third) . "  $data{$first}{$second}{$third} Time(s)\n";
+			}
+		}
+		print "\n";
+	}
+}
+
+# Prints a hash that's four levels deep in a generic hierarchical manor
+sub printLevel4 {
+	my $msg = $_[0];
+	my %data = %{$_[1]};
+
+	print "\n\t---- $msg ----\n\n";
+	foreach $first (sort(keys %data)) {
+		$first_total = 0;
+		foreach $second (keys %{$data{$first}}) {
+			$second_total{$second} = 0;
+			foreach $third (keys %{$data{$first}{$second}}) {
+				$third_total{$second}{$third} = 0;
+				foreach $fourth (keys %{$data{$first}{$second}{$third}}) {
+					$third_total{$second}{$third} += $data{$first}{$second}{$third}{$fourth};
+				}
+				$second_total{$second} += $third_total{$second}{$third};
+			}
+			$first_total += $second_total{$second};
+		}
+
+		print "\t" . LookupIP($first) . ":  $first_total Time(s)\n";
+		foreach $second (sort(keys %{$data{$first}})) {
+			print "\t\t" . LookupIP($second) . ":  $second_total{$second} Time(s)\n";
+			foreach $third (sort(keys %{$data{$first}{$second}})) {
+				print "\t\t\t" . LookupIP($third) . ":  $third_total{$second}{$third} Time(s)\n";
+				foreach $fourth (sort(keys %{$data{$first}{$second}{$third}})) {
+					print "\t\t\t\t" . LookupIP($fourth) . "  $data{$first}{$second}{$third}{$fourth} Time(s)\n";
+				}
+			}
+		}
+		print "\n";
+	}
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

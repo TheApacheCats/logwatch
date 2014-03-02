@@ -1,0 +1,457 @@
+#########################################################################
+# $Id: netopia,v 1.3 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Laurent DUFOUR <laurent.dufour@havas.com>,<dufour_l@hotmail.com>
+#    based on the work of
+#    Kirk Bauer <kirk@kaybee.org>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to laurent.dufour@havas.com
+########################################################
+
+#####################################################
+## Copyright (c) 2008 Laurent DUFOUR
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':all';
+
+$Debug = ValueOrDefault($ENV{'LOGWATCH_DEBUG'}, 0);
+$Detail = ValueOrDefault($ENV{'LOGWATCH_DETAIL_LEVEL'}, 0);
+
+# Avoid "Use of uninitialized value" warning messages.
+sub ValueOrDefault {
+    my ($value, $default) = @_;
+    return ($value ? $value : $default);
+}
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside NETOPIA Filter \n\n";
+    $DebugCounter = 1;
+}
+
+
+my ($month,$day,$time,$host_ip,$host,$conn,$msg,$message);
+
+while (defined($ThisLine = <STDIN>)) {
+    if ( $Debug >= 30 ) {
+	print STDERR "DEBUG($DebugCounter): $ThisLine";
+	$DebugCounter++;
+    }
+
+($month,$day,$time,$host_ip,$host,$msg)=split(/ +/,$ThisLine,7);
+
+   if ( ($ThisLine =~ /traffic/ ) or
+         ($ThisLine =~ /Copyright/ ) or
+         ($ThisLine =~ /removed due to simultaneous rekey/ ) or
+         ($ThisLine =~ /Responded to the first peer message/ ) or
+         ($ThisLine =~ /NBR change/ ) or
+         ($ThisLine =~ /accept udp/ ) or
+         ($ThisLine =~ /accept tcp/ ) or
+         ($ThisLine =~ /accept icmp/ ) or
+         ($ThisLine =~ /accept ip/ ) or
+         ($ThisLine =~ /denied udp/ ) or
+         ($ThisLine =~ /denied tcp/ ) or
+         ($ThisLine =~ /denied icmp/ ) or
+         ($ThisLine =~ /denied ip/ )
+    ) {
+      # don't care about this, will code this later
+   }
+   elsif ( ($src_ip,$dst_ip) = ($ThisLine =~ /IP:  Demand call requested by (\d+\.\d+\.\d+\.\d+) to IP destination (\d+\.\d+\.\d+\.\d+)/) ) {
+      $IPDemandCall{$host}{$src_ip," ",$dst_ip}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /PPP: NCP up, (.*)/) ) {
+      $PPPNcpUp{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /PPP: IPCP down, (.*)/) ) {
+      $PPPIpCpDown{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /PPP: MSCHAP-v2 we accepted remote, (.*)/) ) {
+      $PPPAccepted{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /PPP: MSCHAP-v2 remote accepted us, (.*)/) ) {
+      $PPPAccepted{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /PPP: CCP negotiated, (.*)/) ) {
+      $PPPCcpNeg{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /PPP: IPCP negotiated, (.*)/) ) {
+      $PPPIpCpNeg{$host}{$interface}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /PPP: Channel (.+) up, Dialout Profile name: (.*)/) ) {
+      $PPPChannelUp{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /PPP: Channel (.+) up, Answer Profile name: (.*)/) ) {
+      $PPPChannelUp{$host}{$dst_ip}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /PPTP-1 down: (.*)/) ) {
+      $PPTP1Down{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /PPTP-2 down: (.*)/) ) {
+      $PPTP2Down{$host}{$interface}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /PPTP: IP down, rem: (\d+\.\d+\.\d+\.\d+) (.*)/) ) {
+      $PPTPIpDown{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /PPTP: IP up, rem: (\d+\.\d+\.\d+\.\d+), (.*)/) ) {
+      $PPTPIpUp{$host}{$dst_ip}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /System Config saved from host (\d+\.\d+\.\d+\.\d+) (.*)/) ) {
+      $SysCfgSaved{$host}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($dst_ip,$msg) = ($ThisLine =~ /The system configuration was saved from host (\d+\.\d+\.\d+\.\d+) by (.*)/) ) {
+      $SysCfgSaved{$host}{LookupIP($dst_ip)}++;
+   }
+   elsif ( ($ThisLine =~ /Compiled/) ) {
+      $Started{$host}++;
+   }
+   elsif ( ($ThisLine =~ /DNS entries have been automatically refreshed./) ) {
+      $DNSRefreshed{$host}++;
+   }
+   elsif ( ($ThisLine =~ /DNS has been refreshed./) ) {
+      $DNSRefreshed{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog host domain name has been changed/) ) {
+      $SyslogHost{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog facility has been changed/) ) {
+      $SyslogFacility{$host}++;
+   }
+   elsif ( ($ThisLine =~ /Syslog security facility has been changed/) ) {
+      $SyslogFacility{$host}++;
+   }
+   elsif ( ($ThisLine =~ /The system clock has been updated through NTP./) ) {
+      $NTPUpdated{$host}++;
+   }
+   elsif ( ($ThisLine =~ /failed to get clock through NTP/) ) {
+      $NTPFailed{$host}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RELOAD: (.*)/) ) {
+      $ReloadRequested{$host}{$message}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RESTART: (.*)/) ) {
+      $Restarted{$host}{$message}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /Admin User "(\S+)" logged in for Web\((\S+)\) management \(port (\d+)\) from (.+):(.+). (.*)/) ) {
+       if ($Debug >= 5) {
+	   print STDERR "DEBUG: Found -$1 logged in from $4 using $2\n";
+       }
+       if ($Detail >= 20) {
+	   $Users{$host}{$2}{$4}{$1}++;
+       } else {
+	   $Users{$host}{$2}{$4}{"(all)"}++;
+       }
+   }
+   elsif ( $ThisLine =~ m/Admin user (\S+) login attempt for (\S+) management \(port (\d+)\) from (.+):(.+). failed. (.*)/ ) {
+       if ( $Debug >= 5 ) {
+	   print STDERR "DEBUG: Found -Failed login- line\n";
+       }
+       my $name = LookupIP($4);
+       $BadLogins{$host}{"$1/$2 from $name"}++;
+   }
+   elsif ( $ThisLine =~ m/SSH client at (.+) has attempted to make an SCS connection to interface untrust with IP (.+) but failed (.*)/ ) {
+       my $name = LookupIP($2);
+       $Temp = "SSH from $name";
+       $BadLogins{$host}{$Temp}++;
+       $IllegalUsers{$host}{$Temp}++;
+   }
+else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if (keys %Started) {
+   print "\nDevice started :\n";
+   foreach $ThisOne (keys %Started) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Started{$ThisOne}}) {
+         print "\t Started" .$ThatOne . "\t: " . $Started{$ThisOne}{$ThatOne} . "{ Time(s)\n";
+      }
+   }
+}
+
+if (keys %IPDemandCall) {
+   print "\nDevice where ip demand call have been requested :\n";
+   foreach $ThisOne (keys %IPDemandCall) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$IPDemandCall{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $IPDemandCall{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %PPPNcpUp) ) {
+   print "\nDevice where PPP Ncp UP :\n";
+   foreach $ThisOne (keys %PPPNcpUp) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPPNcpUp{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPPNcpUp{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if ( ( $Detail >= 15 ) and (keys %PPPCcpUp) ) {
+   print "\nDevice where PPP CCP NEGOTIATED :\n";
+   foreach $ThisOne (keys %PPPCcpNeg) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPPCcpNeg{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPPCcpNeg{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %PPPIpCpDown) ) {
+   print "\nDevice where PPP IPCP down :\n";
+   foreach $ThisOne (keys %PPPIpCpDown) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPPIpCpDown{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPPIpCpDown{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if ( ( $Detail >= 15 ) and (keys %PPPIpCpNeg) ) {
+   print "\nDevice where PPP IPCP NEGOTIATED :\n";
+   foreach $ThisOne (keys %PPPIpCpNeg) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPPIpCpNeg{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPPIpCpNeg{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPUpdated) {
+   print "\nDevice where The system clock has been updated through NTP :\n";
+   foreach $ThisOne (keys %NTPUpdated) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NTPUpdated{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPUpdated{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPFailed) {
+   print "\nDevice where failed to get clock through NTP :\n";
+   foreach $ThisOne (keys %NTPFailed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$NTPFailed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPFailed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %DNSRefreshed) {
+   print "\nDevice where DNS have been refreshed  :\n";
+   foreach $ThisOne (keys %DNSRefreshed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$DNSRefreshed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DNSRefreshed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %DNSRefreshed) {
+   print "\nDevice where DNS have been refreshed  :\n";
+   foreach $ThisOne (keys %DNSRefreshed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$DNSRefreshed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DNSRefreshed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %PPPAccepted) ) {
+   print "\nDevice where PPP is accepted  :\n";
+   foreach $ThisOne (keys %PPPAccepted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPPAccepted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPPAccepted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %PPTP1Down) ) {
+   print "\nDevice where PPTP-1 is down  :\n";
+   foreach $ThisOne (keys %PPTP1Down) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPTP1Down{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPTP1Down{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %PPTP2Down) ) {
+   print "\nDevice where PPTP-2 is down  :\n";
+   foreach $ThisOne (keys %PPTP2Down) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPTP2Down{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPTP2Down{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SyslogFacility) {
+   print "\nDevice where Syslog facility has been changed  :\n";
+   foreach $ThisOne (keys %SyslogFacility) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SyslogFacility{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SyslogFacility{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SyslogHost) {
+   print "\nDevice where Syslog host has been changed  :\n";
+   foreach $ThisOne (keys %SyslogHost) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SyslogHost{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SyslogHost{$ThisOne}{$ThisOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if (keys %Restarted) {
+   print "\nDevice restarted :\n";
+   foreach $ThisOne (keys %Restarted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$Restarted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Restarted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ReloadRequested) {
+   print "\nDevice reload requested :\n";
+   foreach $ThisOne (keys %ReloadRequested) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$ReloadRequested{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ReloadRequested{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %PPPChannelUp) {
+   print "\nVPN Up PPP Channel :\n";
+   foreach $ThisOne (keys %PPPChannelUp) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPPChannelUp{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPPChannelUp{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %PPTPIpDown) {
+   print "\nVPN Down on :\n";
+   foreach $ThisOne (keys %PPTPIpDown) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPTPIpDown{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPTPIpDown{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 15 ) and (keys %PPTPIpUp) ) {
+   print "\nDevice where PPTP is UP :\n";
+   foreach $ThisOne (keys %PPTPIpUp) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$PPTPIpUp{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $PPTPIpUp{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+if (keys %SysCfgSaved) {
+   print "\nDevice where system config have been saved :\n";
+   foreach $ThisOne (keys %SysCfgSaved) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (keys %{$SysCfgSaved{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SysCfgSaved{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+
+
+if (keys %BadLogins) {
+    print "\nFailed logins from these:\n";
+    foreach $ThisOne (keys %BadLogins) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$BadLogins{$ThisOne}}) {
+	    print "\t   $_: $BadLogins{$ThisOne}{$_} Time(s)\n";
+	}
+    }
+}
+
+if (keys %IllegalUsers) {
+    print "\nIllegal users from these:\n";
+    foreach $ThisOne (keys %IllegalUsers) {
+	print "   " . $ThisOne . ":\n";
+	for (sort keys %{$IllegalUsers{$ThisOne}}) {
+	    print "\t   $_: $IllegalUsers{$ThisOne}{$_} Time(s)\n";
+
+	}
+    }
+}
+
+
+if (keys %Users) {
+    print "\nUsers logging in through :\n";
+foreach $ThisOne (keys %Users) {
+    print "   " . $ThisOne . ":\n";
+
+foreach $user (sort {$a cmp $b} keys %{$Users{$ThisOne}}) {
+    print "   $user:\n";
+    my $totalSort = TotalCountOrder(%{$Users{$ThisOne}{$user}}, \&SortIP);
+    foreach my $ip (sort $totalSort keys %{$Users{$ThisOne}{$user}}) {
+	my $name = LookupIP($ip);
+	if ($Detail >= 20) {
+            print "      $name:\n";
+            my $sort = CountOrder(%{$Users{$ThisOne}{$user}{$ip}});
+            foreach my $method (sort $sort keys %{$Users{$ThisOne}{$user}{$ip}}) {
+		my $val = $Users{$ThisOne}{$user}{$ip}{$method};
+		my $plural = ($val > 1) ? "s" : "";
+		print "         $method: $val time$plural\n";
+            }
+	} else {
+            my $val = (values %{$Users{$ThisOne}{$user}{$ip}})[0];
+            my $plural = ($val > 1) ? "s" : "";
+            print "      $name: $val time$plural\n";
+	}
+    }
+}
+}
+}
+
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

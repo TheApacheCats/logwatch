@@ -1,0 +1,64 @@
+
+##########################################################################
+# $Id: sshd2,v 1.9 2008/03/24 23:31:27 kirk Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Gerald Teschl <gerald@esi.ac.at>
+########################################################
+
+#######################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   if ( ($ThisLine =~ /^Daemon is running.$/) or
+         ($ThisLine =~ /^Listener created on port .*$/) or
+         ($ThisLine =~ /^sshd2$/) ) {
+      # don't care about these
+   }
+   elsif ( $ThisLine =~ /^Starting sshd2: $/ ) {
+      $Started++;
+   }
+   else {
+      # Report any unmatched entries...
+      chomp($ThisLine);
+      $OtherList{$ThisLine}++;
+   }
+}
+
+if ( ($Detail >= 10) and ($Started) ) {
+   print "\nStatistics:\n";
+   print "   Sshd2 started: $Started Time(s)\n";
+}
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $ThisOne (keys %OtherList) {
+      print "$ThisOne: $OtherList{$ThisOne} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

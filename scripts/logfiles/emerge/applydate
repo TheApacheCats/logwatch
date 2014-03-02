@@ -1,0 +1,85 @@
+
+##########################################################################
+# $Id: applydate,v 1.5 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+# $Log: applydate,v $
+# Revision 1.5  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.4  2007/02/16 04:38:13  bjorn
+# Check timestamp using proper "seconds since epoch" format, by Jason.
+#
+# Revision 1.3  2005/06/18 19:36:32  bjorn
+# Bug fix from Mike Frysinger for incorrect variable reference
+#
+# Revision 1.2  2005/05/03 19:33:39  bjorn
+# Added support for new date ranges
+#
+# Revision 1.1  2005/04/20 22:13:32  bjorn
+# Initial file by Matt Brown
+#
+##########################################################################
+
+##########################################################################
+# This was written by: Matt Brown,  mdbrown at uwaterloo dot ca
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to logwatch-devel@lists.sourceforge.net.
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+# Processes emerge logs to remove entries outside the desired date range
+
+use strict;
+use Logwatch ':dates';
+use POSIX qw(strftime);
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+
+# Set the date we are looking for based on the desired date range
+my $SearchDate = TimeFilter('%Y %b %e %H:%M:%S');
+
+if ($Debug > 5) {
+    print STDERR "DEBUG: Inside applydate (emerge)...\n";
+    print STDERR "DEBUG: Looking For: $SearchDate\n";
+}
+
+# Examine each line of the file, writing out only the lines that are within
+# the date range
+
+my $emergeTime;
+
+while (defined(my $line = <STDIN>)) {
+      $line =~ /^(\d+):/;
+      $emergeTime = strftime('%Y %b %e %H:%M:%S', localtime($1));
+
+      if ($Debug > 5) {
+              print STDERR "DEBUG: converted time: $emergeTime\n";
+      }
+
+      if ($emergeTime =~ /$SearchDate/) {
+         print $line;
+      }
+}
+
+# vi: shiftwidth=3 syntax=perl tabstop=3 et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

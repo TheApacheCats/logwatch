@@ -1,0 +1,166 @@
+##########################################################################
+# $Id: qmail,v 1.12 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+$QmailDetail = $ENV{'qmail_high_detail'};
+$QmailThreshold = $ENV{'threshold'};
+$RemoteThreshold = $ENV{'remote_threshold'};
+$LocalThreshold  = $ENV{'local_threshold'};
+$FromThreshold   = $ENV{'from_threshold'};
+$IgnoreUnmatched = $ENV{'qmail_ignore_unmatched'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   if (
+         ( $ThisLine =~ /new msg/ ) or
+         ( $ThisLine =~ /status: / ) or
+         ( $ThisLine =~ /bounce msg/ ) or
+         ( $ThisLine =~ /triple bounce/ ) or
+         ( $ThisLine =~ /tcpserver/ ) or
+         ( $ThisLine =~ /end msg/ )
+      ) {
+      # We don't care about these
+   } elsif (
+         ($msgid,$DeliveryResponse,$Response) = ( $ThisLine =~ /delivery (\d+)\: (.*?)\:(.*)/ )
+         ) {
+      if ( $Response =~ /did_/ ) {
+         # ignore these.
+      } else {
+         if ( ($ResponseCode) = ( $Response =~ /Remote_host_said\:_(\d{3})_/ ) ) {
+            $ServerResponses->{$DeliveryResponse}->{$ResponseCode}++;
+         } else {
+            if ( $DeliveryResponse =~ /failure/ ) {
+               $ResponseCode=511;
+               $ServerResponses->{$DeliveryResponse}->{$ResponseCode}++;
+            }
+            if ( $DeliveryResponse =~ /deferral/ ) {
+               $ResponseCode=443;
+               $ServerResponses->{$DeliveryResponse}->{$ResponseCode}++;
+            }
+         }
+      }
+   } elsif ( ($EmailFrom) = ( $ThisLine =~ /from \<(.*)\>/ ) ) {
+      $From{$EmailFrom}++;
+   } elsif ( ($ToLocal) = ( $ThisLine =~ /to local (.*)/ ) ) {
+      $Local{$ToLocal}++;
+   } elsif ( ($ToRemote) = ( $ThisLine =~ /to remote (.*)/ ) ) {
+      $Remote{$ToRemote}++;
+   } else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if ($QmailDetail >= 1) {
+   if ($QmailThreshold > 0) {
+      if (($RemoteThreshold < 0) or ($RemoteThreshold eq '')) {
+         $RemoteThreshold = $QmailThreshold;
+      }
+      if (($FromThreshold < 0) or ($FromThreshold eq '')) {
+         $FromThreshold = $QmailThreshold;
+      }
+      if (($LocalThreshold < 0) or ($LocalThreshold eq '')) {
+         $LocalThreshold = $QmailThreshold;
+      }
+   }
+
+   if (($RemoteThreshold < 0) or ($RemoteThreshold eq '')) {
+      $RemoteThreshold = 0;
+   }
+   if (($FromThreshold < 0) or ($FromThreshold eq '')) {
+      $FromThreshold = 0;
+   }
+   if (($LocalThreshold < 0) or ($LocalThreshold eq '')) {
+      $LocalThreshold = 0;
+   }
+
+   if ( (keys %From) ) {
+      print "\nEmails from (Threshold of " . $FromThreshold . "):\n";
+      $threshold_reached=0;
+      foreach $Line (sort {$a cmp $b} keys %From) {
+         if ($From{$Line} >= $FromThreshold) {
+            $threshold_reached=1;
+            print "\t" . $Line . " - ". $From{$Line} . " Time(s)\n";
+         }
+      }
+      if ($threshold_reached < 1) {
+         print "\t" . "None found above the threshold\n";
+      }
+   }
+
+   if ( (keys %Remote) ) {
+      print "\nEmails to Remote Server (Threshold of " . $RemoteThreshold . "):\n";
+      $threshold_reached=0;
+      foreach $Line (sort {$a cmp $b} keys %Remote) {
+         if ($Remote{$Line} >= $RemoteThreshold) {
+            $threshold_reached=1;
+            print "\t" . $Line . " - ". $Remote{$Line} . " Time(s)\n";
+         }
+      }
+      if ($threshold_reached < 1) {
+         print "\t" . "None found above the threshold\n";
+      }
+   }
+
+   if ( (keys %Local) ) {
+      print "\nEmails to Local Server (Threshold of " . $LocalThreshold . "):\n";
+      $threshold_reached=0;
+      foreach $Line (sort {$a cmp $b} keys %Local) {
+         if ($Local{$Line} >= $LocalThreshold) {
+            $threshold_reached=1;
+            print "\t" . $Line . " - ". $Local{$Line} . " Time(s)\n";
+         }
+      }
+      if ($threshold_reached < 1) {
+         print "\t" . "None found above the threshold\n";
+      }
+   }
+}
+
+if (keys %{$ServerResponses}) {
+   print "\nRemote Server Responses:\n";
+   foreach $Line (sort {$a cmp $b} keys %{$ServerResponses}) {
+      foreach $Detail (sort {$a cmp $b} keys %{$ServerResponses->{$Line}}) {
+         $ServerResponseTotal{$Line} += $ServerResponses->{$Line}->{$Detail};
+         $ServerResponseOverallTotal += $ServerResponses->{$Line}->{$Detail};
+         print "\t".ucfirst($Line)."(" . $Detail . ") - ". $ServerResponses->{$Line}->{$Detail} . " Time(s)\n";
+      }
+   }
+   print "\n\tPercentage(s):\n";
+   foreach $Details (sort {$a cmp $b} keys %ServerResponseTotal) {
+      $percentage = (($ServerResponseTotal{$Details} / $ServerResponseOverallTotal) * 100);
+      print "\t\t" . ucfirst($Details) . " - ";
+      printf("%.2f",$percentage);
+      print " %\n";
+   }
+}
+
+if (($#OtherList >= 0) and (not $IgnoreUnmatched)){
+	print "\n**Unmatched Entries**\n";
+	print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

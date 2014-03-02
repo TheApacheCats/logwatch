@@ -1,0 +1,104 @@
+
+##########################################################################
+# $Id: init,v 1.17 2009/06/02 14:52:32 mike Exp $
+##########################################################################
+
+#####################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   if (( $ThisLine =~ /open\(.*\): No such file or directory/)  or
+      ( $ThisLine =~ /Id "r" respawning too fast: disabled for 5 minutes/) or
+      ( $ThisLine =~ /Re-reading inittab/) or
+      ( $ThisLine =~ /.* main process ended, respawning/) or
+      ( $ThisLine =~ /Disconnected from system bus/)) {
+      # We don't care about these
+   }
+   elsif ( $ThisLine =~ s/Switching to runlevel: (.)\s*$/$1/ ) {
+      # Which runlevel did we change to?
+      chomp ($ThisLine);
+      $RunLevel{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ s/^Entering runlevel: (.)\s*$/$1/ ) {
+      # Which runlevel did we enter?
+      chomp ($ThisLine);
+      $RunLevel{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ s/^Trying to re-exec init// ) {
+	   # Look for telinit executions
+	   chomp ($ThisLine);
+	   $ReExecInit++;
+   }
+   elsif ( ($Name,$Cause) = ($ThisLine =~ /(.*) main process \([0-9]*\) killed by (.*)/)) {
+      $ProcessKilled{"$Name,$Cause"}++;
+   }
+   elsif ( ($Name, $Status) = ($ThisLine =~ /(.*) main process \([0-9]*\) terminated with status ([0-9]*)/)) {
+      $ProcessTerminated{"$Name,Status"}++;
+   }
+   elsif ( $ThisLine =~ /Re-executing \/sbin\/init/) {
+      $ReExecSbinInit++;
+   }
+   else {
+      # report any unmatched entries
+      push @OtherList,$ThisLine;
+   }
+}
+
+if ((keys %RunLevel) and ($Detail >= 10)) {
+   foreach $Level (sort keys %RunLevel) {
+      print "   Entered or switched to runlevel " . $Level . ": " . $RunLevel{$Level} . " Time(s)\n";
+   }
+}
+
+if ($ReExecInit and $Detail) {
+	print "\n\nRe-execs of init: $ReExecInit times\n";
+}
+
+if ($ReExecSbinInit and $Detail) {
+        print "\n\nRe-executing \/sbin\/init/: $ReExecSbinInit times\n";
+}
+
+if ((keys %ProcessKilled) and ($Detail >=10)) {
+   print "\nKilled processses:\n";
+   foreach (keys %ProcessKilled) {
+      my ($Name,$Cause)=split ",";
+      print "   Process " . $Name. " killed by " . $Cause . ": " . $ProcessKilled{"$Name,$Cause"} . " Time(s)\n";
+   }
+}
+
+if ((keys %ProcessTerminated) and ($Detail >=10)) {
+   print "\nTerminated processses:\n";
+   foreach (keys %ProcessTerminated) {
+      my ($Name,$Status)=split ",";
+      print "   Process " . $Name. " terminated with status " . $Cause . ": " . $ProcessTerminated{"$Name,$Status"} . " Time(s)\n";
+   }
+}
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

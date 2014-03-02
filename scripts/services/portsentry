@@ -1,0 +1,155 @@
+
+##########################################################################
+# $Id: portsentry,v 1.10 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Osma Ahvenlampi <oa@iki.fi>
+########################################################
+
+#######################################################
+## Copyright (c) 2008 Osma Ahvenlampi
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':ip';
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   next if ($ThisLine eq "");
+   if ( ( $ThisLine =~ /Starting portsentry/ ) or
+        ( $ThisLine =~ /PortSentry is now active/ ) or
+        ( $ThisLine =~ /Psionic PortSentry .* (starting|shutting)/ ) or
+        ( $ThisLine =~ /portsentry shutdown/ ) ) {
+       # don't care
+   } elsif( ($scan,$host,$proto,$port) = ( $ThisLine =~ m|attackalert: (.+) scan from host: [^/]+/(\S+) to (\w+) port: (\d+)| ) ){
+       $host = LookupIP($host);
+       $Scans{$scan}{$host}{$port}++;
+   } elsif ( ($host) = ( $ThisLine =~ /Host (\S+) has been blocked/ ) ){
+       $host = LookupIP($host);
+       $Blocked{$host}++;
+   } elsif( ($host) = ( $ThisLine =~ /Host: (\S+) is already blocked/ ) ){
+       # ignore
+   } elsif( ($mode,$proto,$port) = ( $ThisLine =~ /: (.+) scan detection mode activated. Ignored (\w+) port: (\d+)/ ) ){
+       $Ignored{$mode}{$proto}{$port}++;
+   } elsif( ($mode,$port) = ( $ThisLine =~ /: (.+) mode will manually exclude port: (\d+)/ ) ){
+       $Exclude{$mode}{$port}++;
+   } else{
+       $Unknown{$ThisLine}++;
+   }
+}
+
+if (keys %Scans) {
+   print "\nWarning: Portscans detected";
+   foreach $mode (sort {$a cmp $b} keys %Scans) {
+      print "\n   " . $mode . " from:";
+      foreach $host (sort {$a cmp $b} keys %{$Scans{$mode}}) {
+         print "\n      " . $host . ": ports:";
+         $ports = $prev = $list = undef;
+         foreach $port (sort {$a <=> $b} keys %{$Scans{$mode}{$host}}) {
+  	  if ($prev && ($port-1) == $prev) {
+  	      $ports .= "-" if (!$list);
+  	      $list = 1;
+  	  } elsif ($list) {
+  	      $ports .= "$prev $port";
+  	      $list = undef;
+  	  } else {
+  	      $ports .= " $port";
+  	  }
+  	  $prev = $port;
+         }
+         $ports .= $prev if ($list);
+         # don't display the port list if it doesn't fit on one line
+         if (length($ports) > 55 && $Detail < 10) {
+  	  print " (too many, set Detail to High for complete list)";
+         } else {
+  	   print $ports;
+         }
+      }
+   }
+   print "\n";
+}
+
+if (keys %Blocked) {
+   print "\n";
+   foreach $host (keys %Blocked) {
+      print "Warning: Blocked route from/to $host $Blocked{$host} times(s).\n";
+   }
+}
+
+if ( ($Detail >= 10) and (keys %Ignored) ) {
+   print "\nIgnored following ports";
+   foreach $mode (sort {$a cmp $b} keys %Ignored) {
+      print "\n   " . $mode . ":";
+      foreach $proto (sort {$a cmp $b} keys %{$Ignored{$mode}}) {
+         print "\n      " . $proto . ": ports:";
+         $prev = $list = undef;
+         foreach $port (sort {$a <=> $b} keys %{$Ignored{$mode}{$proto}}) {
+  	  if ($prev && ($port-1) == $prev) {
+  	      print "-" if (!$list);
+  	      $list = 1;
+  	  } elsif ($list) {
+  	      print "$prev $port";
+  	      $list = undef;
+  	  } else {
+  	      print " $port";
+  	  }
+  	  $prev = $port;
+         }
+         print $prev if ($list);
+      }
+   }
+   print "\n";
+}
+
+if ( ($Detail >= 10) and (keys %Exclude) ) {
+   print "\nExcluded following ports";
+   foreach $mode (sort {$a cmp $b} keys %Exclude) {
+      print "\n   " . $mode . ": ports:";
+      $prev = $list = undef;
+      foreach $port (sort {$a <=> $b} keys %{$Exclude{$mode}}) {
+         if ($prev && ($port-1) == $prev) {
+             print "-" if (!$list);
+             $list = 1;
+         } elsif ($list) {
+             print "$prev $port";
+             $list = undef;
+         } else {
+             print " $port";
+         }
+         $prev = $port;
+      }
+      print $prev if ($list);
+   }
+   print "\n";
+}
+
+if ( ($Detail >= 5) and (keys %Unknown) ) {
+   print "\n**Unmached entries**\n";
+   foreach $ThisOne (sort {$a cmp $b} keys %Unknown) {
+      print $Unknown{$ThisOne} . " Time(s): " . $ThisOne . "\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

@@ -1,0 +1,358 @@
+
+##########################################################################
+# $Id: smartd,v 1.26 2009/06/02 15:01:34 mike Exp $
+##########################################################################
+# $Log: smartd,v $
+# Revision 1.26  2009/06/02 15:01:34  mike
+# Fedora patch from Ivan Varekova -mgt
+#
+# Revision 1.25  2008/12/09 18:24:24  mike
+# Patch from Stefan Jakobs for new smartd with SATA support -mgt
+#
+# Revision 1.24  2008/06/30 20:47:20  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.23  2008/03/24 23:31:27  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.22  2008/01/16 20:22:38  bjorn
+# Makes reporting of SCSI and IDE uniform, by Tom Shield.
+#
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Jaco Botha <jaco_botha@hotmail.com>
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use strict;
+
+my ($Device, $Msg, $Test);
+my %ParamChanges = ();
+my %TempChanges = ();
+my %TempLimit = ();
+my %TempCritLimit = ();
+my %Pendsectors = ();
+my %NumPendsectors = ();
+my %Offsectors = ();
+my %NumOffsectors = ();
+my %Warnings = ();
+my %UnableToReg = ();
+my $ShutdownFailed = 0;
+my $StartupFailed = 0;
+my %NotInDatabase = ();
+my %CantMonitor = ();
+my $UnableToMonitor = 0;
+my %SelfTest = ();
+my %Failed = ();
+my @OtherList = ();
+my $DLine = 0;
+my %UnavailableDev = ();
+my %SataDisk = ();
+
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+my $IgnoreUnmatched = $ENV{'smartd_ignore_unmatched'} || 0;
+
+while (defined(my $ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   if ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), No such device(?: or address)?, open\(\) failed/ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), is SMART capable. Adding to "monitor" list./ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), found in smartd database./ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), not found in smartd database./ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), opened/)) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), appears to lack SMART*/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), enabled autosave \(cleared GLTSD bit\)\./ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), enabled SMART Attribute Autosave/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), enabled SMART Automatic Offline Testing/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), Self-Test Log error count increased from \d+ to \d+/ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), new Self-Test Log error at hour timestamp \d+/ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), same Attribute has different ID numbers:/ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Num *Test_Description *Status *Remaining *LifeTime/ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^# *[0-9]+  Short offline *Completed:/ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^# *[0-9]+  Extended offline *Completed:/ )) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^# *[0-9]+  Offline *Fatal or unknown error/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), not capable of SMART self-check/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), is in STANDBY mode, skipping checks/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), self-test in progress, [0-9]+% remaining/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), previous self-test completed without error/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), type changed from \'\w+\' to \'\w+\'/ )) {
+       # ignore
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), state (?:read from|written to)/ )) {
+       # ignore
+   } elsif ( $ThisLine =~ /^file \/var\/run\/smartd.pid written containing PID [0-9]+/ ) {
+       # ignore
+   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^ *$/ )) {
+       # ignore empty lines
+   } elsif ( ($ThisLine =~ /^smartd version/)
+          || ($ThisLine =~ /^Home page/)
+          || ($ThisLine =~ /^smartd .* Copyright \(C\) [0-9-]+ by Bruce Allen/)
+          || ($ThisLine =~ /configuration file/i)
+          || ($ThisLine =~ /\[trip Temperature is \d+ Celsius\]/)
+          || ($ThisLine =~ /^Monitoring/)
+          || ($ThisLine =~ /smartd received signal 15: Terminated/)
+          || ($ThisLine =~ /smartd is exiting \(exit status 0\)/)
+          || ($ThisLine =~ /smartd has fork/)
+	  || ($ThisLine =~ /smartd (startup|shutdown) succeeded/)
+	  || ($ThisLine =~ /Unable to register device (.*) \(no Directive -d removable\). Exiting/)
+	  || ($ThisLine =~ /Device (.*), SATA disks accessed via libata are not currently supported by smartmontools./)
+	  || ($ThisLine =~ /Device: (.*), IE \(SMART\) not enabled, skip device Try '.*' to turn on SMART features/)
+	  || ($ThisLine =~ /Device: (.*), Bad IEC (SMART) mode page, err=-5, skip device/)
+	  || ($ThisLine =~ /Drive: DEVICESCAN, implied '-a' Directive on line [\d]+ of file/)
+	  || ($ThisLine =~ /packet devices \[this device CD\/DVD\] not SMART capable/) )
+   {
+       # ignore
+
+#   } elsif ( ($Device,$Msg) = ($ThisLine =~ /^Device: ([^,]+), (.*)$/)) {
+#      $ParamChanges{$Device}{$Msg}++;
+   } elsif ( ($Device) = ($ThisLine =~ /^Device: ([^,]+), not found in smartd database./ )) {
+      $NotInDatabase{$Device}++;
+   } elsif ( my ($Device,$AttribType,$Code,$Name,undef,undef,undef,$RawVal) = ($ThisLine =~ /^Device: ([^,]+), SMART ([A-Za-z]+) Attribute: ([0-9]+) (Temperature_Celsius) changed from ([0-9]+) (\[Raw [0-9]+\]) to ([0-9]+) \[Raw ([0-9]+)\]/)) {
+      push @{$TempChanges{$Device}}, $RawVal;
+   # smartd reports temperature changes this way only for SCSI disks
+   } elsif ( my ($Device,$AttribType,$Code,$Name,undef,undef,$NewVal) = ($ThisLine =~ /^Device: ([^,]+), SMART ([A-Za-z]+) Attribute: ([0-9]+) ([A-Za-z_]+) changed from ([0-9]+) (\[Raw [0-9]+\] )?to ([0-9]+)/)) {
+      push (@{$ParamChanges{$Device}{"$AttribType: $Name ($Code)"}}, $NewVal);
+   } elsif ( my ($Device,$NewVal) = ($ThisLine =~ /^Device: ([^,]+), initial Temperature is (\d+) Celsius/)) {
+      push @{$TempChanges{$Device}},$NewVal;
+   } elsif ( my ($Device,$Limit) = ($ThisLine =~ /^Device: ([^,]+), Temperature \d+ Celsius reached limit of (\d+) Celsius/)) {
+   # Device: /dev/sda, Temperature 37 Celsius reached limit of 10 Celsius (Min/Max 37/37)
+      $TempLimit{"$Device,$Limit"}++;
+   } elsif ( my ($Device,$Limit) = ($ThisLine =~ /^Device: ([^,]+), Temperature \d+ Celsius reached critical limit of (\d+) Celsius/)) {
+   # Device: /dev/sda, Temperature 38 Celsius reached critical limit of 15 Celsius (Min/Max 38!/39)
+      $TempCritLimit{"$Device,$Limit"}++;
+   } elsif ( my ($Device,$NewVal) = ($ThisLine =~ /^Device: ([^,]+), Temperature changed [-+]?\d+ Celsius to (\d+) Celsius/)) {
+      push @{$TempChanges{$Device}},$NewVal;
+   } elsif ( my ($Device, $Num) = ($ThisLine =~ /^Device: ([^,]+), (\d+) Currently unreadable \(pending\) sectors/) ) {
+      $Pendsectors{$Device}++;
+      $NumPendsectors{$Device} = $Num;
+   } elsif ( my ($Device, $Num) = ($ThisLine =~ /^Device: ([^,]+), (\d+) Offline uncorrectable sectors/) ) {
+      $Offsectors{$Device}++;
+      $NumOffsectors{$Device} = $Num;
+   } elsif ( my ($Device,$TestType) = ($ThisLine =~ /^Device: ([^,]+), starting scheduled (Short|Long) Self-Test/) ) {
+      $SelfTest{$Device}{$TestType}++;
+   } elsif ( my ($Device,$AttribType,$Code,$Name) = ($ThisLine =~ /^Device: ([^,]+), Failed SMART ([A-Za-z]+) Attribute: ([0-9]+) ([A-Za-z_]+)/)) {
+      $Failed{$Device}{"$AttribType attribute: $Name ($Code)"}++;
+   } elsif ( ( $ThisLine =~ /warning/i ) ) {
+      $Warnings{$ThisLine}++;
+   } elsif ( my ($Device, $Text) = ( $ThisLine =~ /^Device: ([^,]+), (can't monitor.*)$/i ) ) {
+      $CantMonitor{$Device}{$Text}++;
+   } elsif ( ($ThisLine =~ /smartd startup failed/ ) ) {
+      $StartupFailed++;
+   } elsif ( ($ThisLine =~ /smartd shutdown failed/ ) ) {
+      $ShutdownFailed++;
+   } elsif ( my ($Device,$DLine) = ($ThisLine =~ /Unable to register SCSI device (.*) at line ([0-9]*) of file/) ) {
+      $UnableToReg{"$Device,$DLine"}++
+   } elsif ( ($Device) = ($ThisLine =~ /Device ([^ ]+) not available/)) {
+      $UnavailableDev{$Device}++;
+   } elsif ( my ($Device) = ($ThisLine =~ /Device (.*): SATA disks accessed via libata are supported by Linux kernel versions 2.6.15-rc1 and above/) ) {
+      $SataDisk{"$Device"}++;
+   } elsif ($ThisLine =~ /Unable to monitor any SMART enabled devices\. Try debug \(-d\) option\. Exiting/) {
+      $UnableToMonitor++;
+   } else {
+      # Report any unmatched entries...
+      push @OtherList,"$ThisLine\n";
+   }
+
+}
+
+if ($UnableToMonitor > 0) {
+   print "\nUnable to monitor any SMART enabled devices.";
+   print "\n    Try debug (-d) option:                    $UnableToMonitor Time(s)\n";
+}
+
+if (keys %NotInDatabase) {
+   print "\n";
+   foreach my $Device (sort keys %NotInDatabase) {
+      print "$Device not in smartd database.\n";
+   }
+
+}
+
+if (keys %CantMonitor) {
+   foreach my $Device (sort keys %ParamChanges) {
+      print "\n$Device :\n";
+      foreach my $Line (sort keys %{$CantMonitor{$Device}}) {
+         print "  $Line - " . $CantMonitor{$Device}{$Line} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ParamChanges) {
+   foreach my $Device (sort keys %ParamChanges) {
+      print "\n$Device :\n";
+      foreach my $Msg (sort keys %{$ParamChanges{$Device}}) {
+         print "   $Msg changed to ";
+         my $count=0;
+         foreach (@{$ParamChanges{$Device}{$Msg}}) {
+           # print 12 values to each line
+           if ($count % 12 == 0) {
+             print "\n     ";
+           }
+           print "$_, ";
+           $count++;
+         }
+         print "\n";
+      }
+   }
+}
+
+if (keys %TempChanges) {
+       print "Temperature Changes\n==================\n";
+       my (@min,@max);
+   foreach my $Device (sort keys %TempChanges) {
+      if($Detail < 10) {
+                       my @sorttemp = sort @{$TempChanges{$Device}};
+                       push @min, $sorttemp[0];
+                       push @max, $sorttemp[$#sorttemp];
+      } elsif($Detail < 20) {
+                       my @sorttemp = sort @{$TempChanges{$Device}};
+                       print "$Device :  $sorttemp[0] - $sorttemp[$#sorttemp]\n";
+               } else {
+                       print "$Device : ";
+                       print join ", ",@{$TempChanges{$Device}};
+                       print "\n";
+               }
+   }
+   if($Detail < 10) {
+          my @sorttemp = sort @min;
+               my $mint = $sorttemp[0];
+          my @sorttemp = sort @max;
+               my $maxt = $sorttemp[$#sorttemp];
+          print "All devices: $mint - $maxt\n";
+   }
+}
+
+if (keys %TempCritLimit) {
+   printf "\nReached critical temperature limit:\n";
+   foreach (keys %TempCritLimit) {
+      my ($Device,$Limit)=split ",";
+      print "\t" . $Device . ": reached limit of " . $Limit . " Celsius: ". $TempCritLimit{"$Device,$Limit"} .  " Time(s)\n";
+   }
+}
+
+if (keys %TempLimit) {
+   printf "\nReached temperature limit:\n";
+   foreach (keys %TempLimit) {
+      my ($Device,$Limit)=split ",";
+      print "\t" . $Device . ": reached limit of " . $Limit . " Celsius: ". $TempLimit{"$Device,$Limit"} .  " Time(s)\n";
+   }
+}
+
+
+if (keys %Pendsectors){
+   print "\nCurrently unreadable (pending) sectors detected:\n";
+   foreach my $Device (sort keys %Pendsectors) {
+      print "\t" . $Device . " - " . $Pendsectors{$Device} . " Time(s)\n";
+      print "\t" . $NumPendsectors{$Device} . " unreadable sectors detected\n";
+   }
+
+}
+
+if (keys %Offsectors){
+   print "\nOffline uncorrectable sectors detected:\n";
+   foreach my $Device (sort keys %Offsectors) {
+      print "\t" . $Device . " - " . $Offsectors{$Device} . " Time(s)\n";
+      print "\t" . $NumOffsectors{$Device} . " offline uncorrectable sectors detected\n";
+   }
+
+}
+
+if (keys %Failed) {
+   foreach my $Device (sort keys %Failed) {
+      print "\n$Device :\n";
+      foreach my $Msg (sort keys %{$Failed{$Device}}) {
+         print "   Failed $Msg " . $Failed{$Device}{$Msg} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SelfTest) {
+   foreach my $Device (sort keys %SelfTest) {
+      print "\n$Device :\n";
+      foreach my $Type (sort keys %{$SelfTest{$Device}}) {
+         print "   started scheduled $Type self-test " . $SelfTest{$Device}{$Type} . " Time(s)\n";
+      }
+   }
+}
+
+if ( (keys %Warnings) ) {
+   print "\nWarnings:\n";
+   foreach my $Line (sort {$Warnings{$b} <=> $Warnings{$a}} keys %Warnings) {
+      print "\t" . $Line . " - ". $Warnings{$Line} . " Time(s)\n";
+   }
+}
+
+if ($StartupFailed) {
+   print "\n Smartd startup failed: " . $StartupFailed . " Time(s)\n";
+}
+
+if ($ShutdownFailed) {
+   print "\n Smartd shutdown failed: " . $ShutdownFailed . " Time(s)\n";
+}
+
+if ( (keys %UnableToReg) ) {
+   print "\n Wrong configuration for devices:\n";
+   foreach (sort keys %UnableToReg) {
+      ($Device,$DLine) = split ",";
+      print "   " . $Device . (" (line ") . $DLine . ") : ". $UnableToReg{"$Device,$DLine"} . " Time(s)\n";
+   }
+}
+
+if (%UnavailableDev) {
+   print "\nUnavailable device:\n";
+   foreach my $Device (sort keys %UnavailableDev) {
+      print "   Device " . $Device . " : " . $UnavailableDev{$Device} . " Time(s)\n";
+   }
+}
+
+if (%SataDisk) {
+   print "\nSATA disk(s) supported by Linux kernel >= 2.6.15-rc1:\n";
+   foreach my $Device (sort keys %SataDisk) {
+      print "  " .$Device .": Try adding '-d ata' or '-d sat' to the smartd.conf config file line\n";
+   }
+   print "\n";
+}
+
+if (($#OtherList >= 0) and (not $IgnoreUnmatched)){
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

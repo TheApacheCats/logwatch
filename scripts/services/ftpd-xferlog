@@ -1,0 +1,193 @@
+##########################################################################
+# $Id: ftpd-xferlog,v 1.23 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use File::Basename qw(dirname);
+
+sub remove_dups {
+   my(@info)=sort @_;
+
+   my(%count,@out,$i);
+   foreach $i (@info) {
+      $count{$i}++;
+   }
+
+   foreach $i (keys %count) {
+      my($j)=$i;
+      $j =~ s/\n//;
+      if ($count{$i} > 1) {
+         push @out, $j . " (".$count{$i}." Times)\n";
+      } else {
+         push @out, "$j\n";
+      }
+   }
+   return @out;
+}
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+$FTPDetail = $ENV{'detail_transfer'};
+
+$TotalBytesOut = 0;
+$TotalBytesIn = 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   # Remove transfer time if it is there
+   if ( ($RemoteHost,$Size,$FileName,$Direction,$AccessMode,$UserName) =
+         ( $ThisLine =~ /^([^ ]+) (\d+) (.*) . . (.) (.) (.*) ftp . .*$/ ) ) {
+      if ($Detail < 15) {
+         $FileName = dirname($FileName);
+      }
+      if ( $AccessMode eq 'a' ) {
+         # Anonymous transfers
+         if ( $Direction eq 'o' ) {
+            # File was outgoing
+            $TotalBytesOut += $Size;
+            if ($Detail >= 15) {
+               $Temp = '   ' . $FileName . ' -> ' . $RemoteHost . ' (Email: ' . $UserName . ")\n";
+            }
+            else {
+               $Temp = '   ' . $FileName . ' -> ' . $RemoteHost . "\n";
+            }
+            push @AnonOut, $Temp;
+            $FilesOut{$FileName}++;
+         } elsif ( $Direction eq 'd' ) {
+            $Temp = '   ' . $FileName . ' Deleted ' . $RemoteHost . ' (Email: ' . $UserName . ")\n";
+            push @DeletedFiles, $Temp;
+         } else {
+            # File was incoming
+            $TotalBytesIn += $Size;
+            if ($Detail >= 15) {
+               $Temp = '   ' . $RemoteHost . ' -> ' . $FileName . ' (User: ' . $UserName . ")\n";
+            }
+            else {
+               $Temp = '   ' . $RemoteHost . ' -> ' . $FileName . "\n";
+            }
+            push @AnonIn, $Temp;
+         }
+      } elsif ( $AccessMode eq 'g' ) {
+        # Guest transfers
+         if ( $Direction eq 'o' ) {
+            # File was outgoing
+            $TotalBytesOut += $Size;
+            $Temp = '   ' . $FileName . ' -> ' . $RemoteHost . ' (User: ' . $UserName . ")\n";
+            push @GuestOut, $Temp;
+         } elsif ( $Direction eq 'd' ) {
+            $Temp = '   ' . $FileName . ' Deleted ' . $RemoteHost . ' (User: ' . $UserName . ")\n";
+            push @DeletedFiles, $Temp;
+         } else {
+            # File was incoming
+            $TotalBytesIn += $Size;
+            $Temp = '   ' . $RemoteHost . ' -> ' . $FileName . ' (User: ' . $UserName . ")\n";
+            push @GuestIn, $Temp;
+         }
+      } elsif ( $AccessMode eq 'r' ) {
+         # User transfers
+         if ( $Direction eq 'o' ) {
+            # File was outgoing
+            $TotalBytesOut += $Size;
+            $Temp = '   ' . $FileName . ' -> ' . $RemoteHost . ' (User: ' . $UserName . ")\n";
+            push @UserOut, $Temp;
+         } elsif ( $Direction eq 'd' ) {
+            $Temp = '   ' . $FileName . ' Deleted ' . $RemoteHost . ' (User: ' . $UserName . ")\n";
+            push @DeletedFiles, $Temp;
+         } else {
+            # File was incoming
+            $TotalBytesIn += $Size;
+            $Temp = '   ' . $RemoteHost . ' -> ' . $FileName . ' (User: ' . $UserName . ")\n";
+            push @UserIn, $Temp;
+         }
+      }
+   } else {
+      # Report any unmatched entries...
+      push @OtherList, $ThisLine;
+   }
+}
+
+@AnonOut=&remove_dups(@AnonOut);
+@AnonIn=&remove_dups(@AnonIn);
+@GuestOut=&remove_dups(@GuestOut);
+@GuestIn=&remove_dups(@GuestIn);
+@UserOut=&remove_dups(@UserOut);
+@UserIn=&remove_dups(@UserIn);
+@OtherList=&remove_dups(@OtherList);
+@DeletedFiles=&remove_dups(@DeletedFiles);
+
+
+$TotalKBytesOut = int $TotalBytesOut/1000;
+$TotalKBytesIn = int $TotalBytesIn/1000;
+$TotalMBytesOut = int $TotalKBytesOut/1000;
+$TotalMBytesIn = int $TotalKBytesIn/1000;
+($TotalKBytesOut > 0) and print "TOTAL KB OUT: " . $TotalKBytesOut . "KB (" . $TotalMBytesOut . "MB)\n";
+($TotalKBytesIn  > 0) and print "TOTAL KB IN: " . $TotalKBytesIn . "KB (" . $TotalMBytesIn . "MB)\n";
+
+if (@AnonIn) {
+   print "\nIncoming Anonymous FTP Transfers:\n";
+   print sort @AnonIn;
+}
+
+if ( (keys %FilesOut) and ($Detail >= 5) and ($Detail < 10) ) {
+   print "\nOutgoing Anonymous FTP Transfers (By File):\n";
+   foreach (sort keys %FilesOut) {
+      print "   $_: $FilesOut{$_} Time(s)\n";
+   }
+}
+
+if ( (@GuestIn) and ($Detail >= 10) and ($FTPDetail > 0)) {
+   print "\nIncoming Guest FTP Transfers:\n";
+   print sort @GuestIn;
+}
+
+if ( (@GuestOut) and ($Detail >= 10) and ($FTPDetail > 0)) {
+   print "\nOutgoing Guest FTP Transfers:\n";
+   print sort @GuestOut;
+}
+
+if ( (@AnonOut) and ($Detail >= 10) ) {
+   print "\nOutgoing Anonymous FTP Transfers:\n";
+   print sort @AnonOut;
+}
+
+if ( (@UserIn) and ($Detail >= 10) and ($FTPDetail > 0)) {
+   print "\nIncoming User FTP Transfers:\n";
+   print sort @UserIn;
+}
+
+if ( (@UserOut) and ($Detail >= 10) and ($FTPDetail > 0)) {
+   print "\nOutgoing User FTP Transfers:\n";
+   print sort @UserOut;
+}
+
+if ( (@DeletedFiles) and ($Detail >= 10) and ($FTPDetail > 0)) {
+   print "\nDeleted Files:\n";
+   print sort @DeletedFiles;
+}
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

@@ -1,0 +1,119 @@
+
+use strict;
+########################################################
+# $Id: tac_acc,v 1.9 2008/03/24 23:31:27 kirk Exp $
+########################################################
+
+########################################################
+# Please send all comments, suggestions, bug reports,
+#    etc, to frank@fam-breedijk.com.
+########################################################
+
+#######################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+my ($ThisLine, @fields, %activity, %isdn, @OtherList);
+
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+    @fields = split /\t/, $ThisLine;
+    if ( @fields == 11 && $fields[10] =~ /^cmd=/ ) {
+        unless ( exists $activity{$fields[1]} ) {
+                $activity{$fields[1]} = {};
+        }
+        unless ( exists $activity{$fields[1]}->{$fields[2]} ) {
+                $activity{$fields[1]}->{$fields[2]} = {};
+        }
+        chomp $fields[10];
+        $fields[10] =~ s/^cmd=//;
+        $activity{$fields[1]}->{$fields[2]}->{$fields[10]}++;
+    }
+    elsif ( @fields == 12 && $fields[11] =~ /^cmd=/ ) {
+        unless ( exists $activity{$fields[1]} ) {
+                $activity{$fields[1]} = {};
+        }
+        unless ( exists $activity{$fields[1]}->{$fields[2]} ) {
+                $activity{$fields[1]}->{$fields[2]} = {};
+        }
+        chomp $fields[11];
+        $fields[11] =~ s/^cmd=//;
+        $activity{$fields[1]}->{$fields[2]}->{$fields[11]}++;
+    }
+    elsif ( @fields == 27 && $fields[24] =~ /^elapsed_time=/ ) {
+        unless ( exists $isdn{$fields[2]} ) {
+                $isdn{$fields[2]} = {};
+        }
+        unless ( exists $isdn{$fields[2]}->{$fields[4]} ) {
+                $isdn{$fields[2]}->{$fields[4]} = {};
+                $isdn{$fields[2]}->{$fields[4]}->{'seconds'} = 0;
+        }
+        chomp $fields[24];
+        $fields[24] =~ s/^elapsed_time=//;
+        $isdn{$fields[2]}->{$fields[4]}->{'seconds'} += $fields[24];
+    }
+    elsif ( @fields == 10 && $fields[5] =~ /^start/ ) {
+        unless ( exists $isdn{$fields[2]} ) {
+                $isdn{$fields[2]} = {};
+        }
+        unless ( exists $isdn{$fields[2]}->{$fields[4]} ) {
+                $isdn{$fields[2]}->{$fields[4]}->{'start'} = 0;
+        }
+        $isdn{$fields[2]}->{$fields[4]}->{'start'}++;
+    }
+    else {
+        # Report any unmatched entries...
+        push @OtherList,$ThisLine;
+    }
+}
+if ((keys %activity) and ($Detail >= 5)) {
+   foreach my $host ( sort keys %activity ) {
+      print "\nActivity on $host:\n";
+      foreach my $user ( sort keys %{$activity{$host}} ) {
+         print "User: $user\n";
+         foreach my $command ( sort keys %{$activity{$host}->{$user}} ) {
+            print "$command\t$activity{$host}->{$user}->{$command} time(s)\n";
+         }
+      }
+   }
+}
+if ((keys %isdn) and ($Detail >= 5)) {
+   foreach my $host ( sort keys %isdn ) {
+      print "\nISDN on $host:\n";
+      foreach my $number ( sort keys %{$isdn{$host}} ) {
+         print "Number: $number dailed total $isdn{$host}->{$number}->{'seconds'} seconds";
+         if ($isdn{$host}->{$number}->{'start'}) {
+           print " started $isdn{$host}->{$number}->{'start'} times\n";
+         } else {
+           print "\n";
+         }
+      }
+   }
+}
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

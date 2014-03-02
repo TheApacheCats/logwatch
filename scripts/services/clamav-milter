@@ -1,0 +1,111 @@
+##################################################################
+#
+# Written by S. Schimkat <www.schimkat.dk>.
+#
+# Find latest version here: www.schimkat.dk/clamav
+#
+##################################################################
+
+########################################################
+## Copyright (c) 2008 S. Schimkat
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'};
+my $IgnoreUnmatched = $ENV{'clamav_ignoreunmatched'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+
+   if (
+       ( $ThisLine =~ /^clamav-milter (startup|shutdown) succeeded$/ ) or
+       ( $ThisLine =~ /^Database has changed, loading updated database/ ) or
+       ( $ThisLine =~ /^Quarantined infected mail as/ ) or
+       ( $ThisLine =~ /^\w+ quarantined as/ ) or
+       ( $ThisLine =~ /^ClamAv: mi_stop/ ) or
+       ( $ThisLine =~ m#^\/tmp\/clamav-.* .* FOUND# ) or
+       # These two go along with "max-children limit" so we ignore them
+       ( $ThisLine =~ /n_children \d+: waiting \d+ seconds for some to exit/ ) or
+       ( $ThisLine =~ /Finished waiting, n_children = \d+/ ) or
+       # These 3 precede "correctly reloaded" (we hope)
+       # - Toss-up: Keep "correctly reloaded" or "Protecting against"?
+       ( $ThisLine =~ /^Database has changed, loading updated database/ ) or
+       ( $ThisLine =~ /^Loaded ClamAV \d+\./ ) or
+       ( $ThisLine =~ /^ClamAV: Protecting against \d+ viruses/ ) or
+       0 ) {
+       # We do not care about these.
+   } elsif (($ThisLine =~ /clean message from/)) {
+      $CleanMessage++;
+   } elsif (($Virus) = ($ThisLine =~ /.*: (.+?) Intercepted virus/i )) {
+      $VirusList{$Virus}++;
+   } elsif (($ChildLimit) = ($ThisLine =~ /hit max-children limit \((\d+ >= \d+)\): waiting for some to exit/)) {
+      $MaxChildrenLimit{$ChildLimit}++;
+   } elsif (($ThisLine =~ /^Stopping/)) {
+      $DaemonStop++;
+   } elsif (($ThisLine =~ /^Starting/)) {
+      $DaemonStart++;
+   } elsif (($Viruses) = ($ThisLine =~ /^Database correctly reloaded \((\d+) (signatures|viruses)\)/i )) {
+      $DatabaseReloads++;
+      $DatabaseViruses = $Viruses;
+   } else {
+      push @OtherList,$ThisLine;
+   }
+}
+
+
+if (($DaemonStop) and ($Detail >= 5)) {
+   print "\nDaemon stopped: " . $DaemonStop . " Time(s)\n";
+}
+
+if (($DaemonStart) and ($Detail >= 5)) {
+   print "\nDaemon started: " . $DaemonStart . " Time(s)\n";
+}
+
+if (($DatabaseReloads) and ($Detail >= 5)) {
+   print "\nVirus database reloaded $DatabaseReloads time(s) (last time with $DatabaseViruses viruses)\n";
+}
+
+if (keys %MaxChildrenLimit) {
+   print "\nHit max-children limit:\n";
+   foreach $Limit (sort {$a cmp $b} keys %MaxChildrenLimit) {
+      print '   Limit ' . $Limit . ' children(s) exceeded ' . $MaxChildrenLimit{$Limit} . " Time(s)\n"
+   }
+}
+
+if ($CleanMessage) {
+   print "\nClean messages: " . $CleanMessage . " Message(s)\n";
+}
+
+if (keys %VirusList) {
+   my $Total = 0;
+   print "\nInfected messages:\n";
+   foreach $Virus (sort {$a cmp $b} keys %VirusList) {
+      print '   ' . $Virus . ": ". $VirusList{$Virus} . " Message(s)\n";
+      $Total += $VirusList{$Virus};
+   }
+   print "  Total: $Total\n";
+}
+
+if (($#OtherList >= 0) and (not $IgnoreUnmatched)){
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

@@ -1,0 +1,424 @@
+##########################################################################
+# $Id: cron,v 1.37 2009/06/02 14:41:09 mike Exp $
+##########################################################################
+# $Log: cron,v $
+# Revision 1.37  2009/06/02 14:41:09  mike
+# Patch from Fedora (Ivan Varekova) -mgt
+#
+# Revision 1.36  2009/02/20 17:57:23  mike
+# Added fedora/redhet patches from Ivan Varekova -mgt
+#
+# Revision 1.35  2008/12/09 18:30:37  mike
+# Inotify patch from Orion Poplawski -mgt
+#
+# Revision 1.34  2008/08/18 15:52:00  mike
+# Fixed WRONG FILE type line 166 [from debian lenny] -mgt
+#
+# Revision 1.33  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.32  2007/11/25 19:54:41  bjorn
+# Handles more PAM and SELINUX errors, by Ivana Varekova.
+#
+# Revision 1.31  2007/08/22 19:03:45  bjorn
+# Processing of icrond messages, by Ivana Varekova.
+#
+# Revision 1.30  2007/02/16 03:13:51  bjorn
+# Fixed typo in variable name.
+#
+# Revision 1.29  2007/01/29 20:12:19  bjorn
+# Handling of "WRONG FILE OWNER", by Ivana Varekova.
+#
+# Revision 1.28  2006/12/20 15:35:02  bjorn
+# Additional filtering, by Ivana Varekova.
+#
+# Revision 1.27  2006/10/20 16:43:04  bjorn
+# Ignore additional log entry, by Willi Mann.
+#
+# Revision 1.26  2006/07/28 17:40:12  bjorn
+# Accounts for log turnover in OpenBSD, by Markus Lude.
+#
+# Revision 1.25  2006/01/31 20:21:25  bjorn
+# Ignore rsyncd, and coalesce ntpdate adjusts, by Bob Hutchinson.
+#
+# Revision 1.24  2005/11/30 05:00:50  bjorn
+# Filtering additional INFO lines, by Willi Mann.
+#
+# Revision 1.23  2005/11/07 23:01:09  bjorn
+# Filtering for fcron, by Georgi Georgiev
+#
+# Revision 1.22  2005/10/03 15:56:43  bjorn
+# Processing "BAD FILE MODE", by Ivana Varekova.
+#
+# Revision 1.21  2005/05/11 20:41:22  mike
+# Added finish and start checks for netbsd 2.0 -mgt
+#
+# Revision 1.20  2005/02/24 17:08:04  kirk
+# Applying consolidated patches from Mike Tremaine
+#
+# Revision 1.7  2005/02/17 01:28:27  mgt
+# Kernel,Cron Patches from Bjorn [from Fedora Bugzilla], emerge.conf patch from Laurent -mgt
+#
+# Revision 1.6  2005/02/16 00:43:28  mgt
+# Added #vi tag to everything, updated ignore.conf with comments, added emerge and netopia to the tree from Laurent -mgt
+#
+# Revision 1.5  2005/02/13 21:26:13  mgt
+# patches from Michael Weiser -mgt
+#
+# Revision 1.4  2004/07/29 19:33:29  mgt
+# Chmod and removed perl call -mgt
+#
+# Revision 1.3  2004/07/10 01:54:34  mgt
+# sync with kirk -mgt
+#
+# Revision 1.17  2004/06/21 15:07:21  kirk
+# - Added check for large user mailboxes
+# - Added pop3 and imapd filters
+# - Updated clamav support
+# - New cisco log filter
+# - Tons of updates to existing filters (too many to list!)
+#
+# Revision 1.16  2004/06/21 14:59:05  kirk
+# Added tons of patches from Pawe? Go?aszewski" <blues@ds.pg.gda.pl>
+#
+# Thanks, as always!
+#
+# Revision 1.15  2004/06/21 14:24:46  kirk
+# RH9 fix from Jindrich Kubec <kubecj@asw.cz
+#
+# Revision 1.14  2004/02/03 03:36:39  kirk
+# Patches from Anssi Kolehmainen <kolean-5.listat@pp.inet.fi>
+#
+# Revision 1.13  2004/02/03 02:45:26  kirk
+# Tons of patches, and new 'oidentd' and 'shaperd' filters from
+# Pawe? Go?aszewski" <blues@ds.pg.gda.pl>
+#
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+$Startups = 0;
+$Reloads = 0;
+$MailErrors = 0;
+$BFMFile = 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   if (
+      ($ThisLine =~ /Updated timestamp for job/) or
+      ($ThisLine =~ /INFO \(pidfile fd = \d+\)/) or
+      ($ThisLine =~ /rsyncd/) or
+      ($ThisLine =~ /INFO \(Running \@(re)?boot jobs\)/) or
+      ($ThisLine =~ /INFO \(Skipping \@(re)?boot jobs -- not system startup\)/) or
+      ($ThisLine =~ /INFO \(not boot nor reboot\)/) or
+      ($ThisLine =~ /INFO \(running with inotify support\)/) or
+      ($ThisLine =~ /INFO \(\@reboot jobs will be run at computer's startup.\)/) or
+      ($ThisLine =~ /logfile turned over/) or
+      ($ThisLine =~ /ready to process filesystem events/) or # newsyslog on OpenBSD
+      ($ThisLine =~ /loading (system|user) tables/) or
+      ($ThisLine =~ /loading table .*/) or
+      ($ThisLine =~ /void Inotify::Remove\(InotifyWatch\*\): removing watch failed/) or
+      ($ThisLine =~ /error: \(22\) Invalid argument/)
+   ) {
+      # Ignore
+   } elsif (
+      ($ThisLine =~ s/^([^ ]+) \([^ ]+\)\s+//) or
+      ($ThisLine =~ s/^\S+\s+\S+\s+..:..:..\s+\S+\s+\S+\[\d+\]:\s+\((\S+)\)\s+//)
+   ) {
+      $User = $1;
+
+      if ($ThisLine =~ s/^CMD \((.+)\)\s*$/$1/) {
+         $Runs->{$User}->{$ThisLine}++;
+      } elsif ($ThisLine =~ s/^CMD FINISH \((.+)\)\s*$/$1/) {
+         $Runs->{$User}->{$ThisLine}++;
+      } elsif ($ThisLine =~ s/^(END|CMD START) \((.+)\)\s*$/$1/) {
+         #Ignore for now, NetBSD users could get tricky with
+         #How many commands started vs finished -mgt
+      } elsif ($ThisLine =~ /ORPHAN \(no passwd entry\)/) {
+         $Orphans++;
+      } elsif ($ThisLine =~ s/^(BEGIN|END) EDIT \((.+)\)\s*$/$2/) {
+         $Runs->{$ThisLine}->{'personal crontab edited'} += 0.5;
+      } elsif ($ThisLine =~ s/^REPLACE \((.+)\)\s*$/$1/) {
+         $Runs->{$ThisLine}->{'personal crontab replaced'}++;
+      } elsif ($ThisLine =~ s/^LIST \((.+)\)\s*$/$1/) {
+         $Runs->{$ThisLine}->{'personal crontab listed'}++;
+      } elsif ($ThisLine =~ s/^DELETE \((.+)\)\s*$/$1/) {
+         $Runs->{$User}->{'personal crontab deleted'}++;
+      } elsif ($ThisLine =~ /^STARTUP \(.*\)\s*$/ ) {
+         $Startups++;
+      } elsif ( $ThisLine =~ /^RELOAD \(.+\)\s*$/ ) {
+         $Runs->{$User}->{'personal crontab reloaded'}++;
+      } elsif ( $ThisLine =~ /^MAIL \(mailed \d+ bytes of output but got status [^ ]+/) {
+         $MailErrors++;
+      } elsif ( $ThisLine =~ /^AUTH \(crontab command not allowed\)/) {
+         $CronDeny{$User}++;
+      } elsif ( $ThisLine =~ /^WRONG INODE INFO \([^ ]+\)/) {
+         $InodeError{$User}++;
+      } elsif ( $ThisLine =~ /session opened/ ||
+                  $ThisLine =~ /session closed/ ) {
+         # ignore
+      } elsif ( ($Reason) = ($ThisLine =~ /^error \((.+)\)$/) ) {
+         $Errors{$Reason}++;
+      } elsif ( ($FileName) = ($ThisLine =~ /BAD FILE MODE \((.+)\)/) ) {
+         $BFMFile{$FileName}++;
+      } elsif ( ($FileName) = ($ThisLine =~ /WRONG FILE OWNER \((.+)\)/) ) {
+         $WFO{$FileName}++;
+      } else {
+         # Report any unmatched entries...
+         push @OtherList, "$ThisLine\n";
+      }
+   } elsif ( $ThisLine =~ /^RELOAD \(.+\)\s*$/ ) {
+      $Reloads++;
+   } elsif ( ($User) = ($ThisLine =~ /^(.*) \([^ ]+\) RELOAD \(.*\)$/ ) ) {
+      $UserReloads{$User}++;
+   } elsif ( $ThisLine =~ /.*?: Job (.*) started for user ([^ ]*)/) {
+      $Runs->{$2}->{$1}++;
+   } elsif (
+      ($ThisLine =~ /.*?: Job (.*) (completed|terminated)/) or
+      ($ThisLine =~ /.*?: updating configuration from/) or
+      ($ThisLine =~ /.*?: Exiting with code 0/) or
+      ($ThisLine =~ /.*?: SIGTERM signal received/)
+   ) {
+      # Ignore
+   } elsif ( ($User) = ($ThisLine =~ /.*?: editing ([^ ]*)'s fcrontab.*/)) {
+      $Runs->{$User}->{'-- personal crontab edited'}++;
+   } elsif ( ($User) = ($ThisLine =~ /.*?: listing ([^ ]*)'s fcrontab.*/)) {
+      $Runs->{$User}->{'-- personal crontab listed'}++;
+   } elsif ( ($User) = ($ThisLine =~ /.*?: adding (?:new )?file ([^ ]+)/)) {
+      $Runs->{$User}->{'-- personal crontab updated'}++;
+      $UserReloads{$User}++;
+   } elsif ( $ThisLine =~ /.*?: fcron.* started/) {
+      $Startups++;
+   } elsif ( ($offset) = ($ThisLine =~ /ntpdate\[\d+\]: adjust time server .* offset (.*) sec/)) {
+      $Ntpdate++;
+	  if ( $ntpdateminoffset > $offset ) { $ntpdateminoffset = $offset; }
+	  if ( $ntpdatemaxoffset < $offset ) { $ntpdatemaxoffset = $offset; }
+   } elsif ($ThisLine =~ /ntpdate\[\d+\]: no server suitable for synchronization found/) {
+     $ntpdatenosync++;
+   } elsif (($ThisLine =~ /incrond/) && ($ThisLine =~ /starting service/)) {
+      $INCRONDSS++;
+   } elsif (($ThisLine =~ /incrond/) && ($ThisLine =~ /stopping service/)) {
+      $INCRONDStS++;
+   } elsif (($ThisLine =~ /incrond/) && (($Table) = ($ThisLine =~ /system table (.*) created, loading/))) {
+      $INCRONDSTCr{$Table}++;
+   } elsif (($ThisLine =~ /incrond/) && (($User) = ($ThisLine =~ /table for user (.*) created, loading/))) {
+      $INCRONDUTCr{$User}++;
+   } elsif (($ThisLine =~ /incrond/) && (($Table) = ($ThisLine =~ /system table (.*) changed, reloading/))) {
+      $INCRONDSTCh{$Table}++;
+   } elsif (($ThisLine =~ /incrond/) && (($User) = ($ThisLine =~ /table for user (.*) changed, reloading/))) {
+      $INCRONDUTCh{$User}++;
+   } elsif (($ThisLine =~ /incrond/) && (($Table) = ($ThisLine =~ /system table (.*) destroyed, removing/))) {
+      $INCRONDSTDe{$Table}++;
+   } elsif (($ThisLine =~ /incrond/) && (($User) = ($ThisLine =~ /table for user (.*) destroyed, removing/))) {
+      $INCRONDUTDe{$User}++;
+   } elsif (  ($ThisLine =~ /incrond/) &&
+      ( (($Error) = ($ThisLine =~ /(cannot create watch for (system table|user) .*: \(2\) No such file or directory)/)) ||
+      (($Error) = ($ThisLine =~ /(access denied on (.*) - events will be discarded silently)/)) ||
+      (($Error) = ($ThisLine =~ /(unhandled exception occurred)/)) ||
+      (($Error) = ($ThisLine =~ /(cannot exec process.*)/))
+      )  ) {
+      $INCRONDErr{$Error}++;
+   } elsif ( ($ThisLine =~ /crond/) &&
+	(($Error) = ($ThisLine =~ /(failed to open PAM security session: (Permission denied|Module is unknown))/))
+	) {
+      $CRONDErr{$Error}++;
+   } elsif (( ($Error) = ($ThisLine =~ /ERROR: (failed to change SELinux context)/)) or
+           (($Error) = ($ThisLine =~ /ERROR:(Could not set exec context to .* for .*)/))) {
+      $SELCONTErr{$Error}++;
+   } elsif ($ThisLine =~ /FAILED to authorize user with PAM \(User not known to the underlying authentication module\)/) {
+      $PAMAUTHErr++;
+   } elsif ( ($FileName,$Cause) = ($ThisLine =~ /ERROR chdir failed \((.*)\): (.*)/) ) {
+      $CHDIRErr{"$FileName,$Cause"}++;
+   } elsif ($ThisLine =~ /ERROR \(failed to change user\)/) {
+      $CHUSERHErr++;
+   } else {
+      # Report any unmatched entries...
+      push @OtherList, "$ThisLine\n";
+   }
+}
+
+#######################################
+
+if (%CronDeny) {
+   print "Attempt to use crontab by unauthorized users:\n";
+   foreach $User (sort {$a cmp $b} keys %CronDeny) {
+      print "   $User : $CronDeny{$User} Time(s)\n";
+   }
+}
+
+if (%InodeError) {
+   print "\nInode errors in crontab files of users:\n";
+   foreach $User (sort {$a cmp $b} keys %InodeError) {
+      print "   $User : $InodeError{$User} Time(s)\n";
+   }
+}
+
+if (keys %Errors) {
+   print "Errors when running cron:\n";
+   foreach $Reason (sort {$a cmp $b} keys %Errors) {
+      print "   $Reason: $Errors{$Reason} Time(s)\n";
+   }
+}
+
+if (keys %{$Runs} and ($Detail >= 5)) {
+   print "\n\nCommands Run:\n";
+   foreach $i (sort {$a cmp $b} keys %{$Runs}) {
+      print "   User $i:\n";
+      foreach $j (sort {$a cmp $b} keys %{$Runs->{$i}}) {
+         print "      $j: " . $Runs->{$i}->{$j} . " Time(s)\n";
+      }
+   }
+}
+
+if ($Orphans) {
+   print "   ORPHAN entries: $Orphans\n";
+}
+
+if ($MailErrors > 0) {
+   print "\nMAIL sending errors $MailErrors Time(s)\n";
+}
+
+if (keys %BFMFile) {
+   print "\nFiles with bad mode:\n";
+   foreach $i (keys %BFMFile) {
+      print "   $i\n";
+   }
+}
+
+if ($Detail >= 10) {
+   if (keys %UserReloads) {
+      print "   User crontabs reloaded:\n";
+      foreach $i (keys %UserReloads) {
+         print "      $i $UserReloads{$i} Time(s)\n";
+      }
+   }
+
+   if ($Startups > 0) {
+      print "\nCRON Restarted $Startups Time(s)\n";
+   }
+
+   if ($Reloads > 0) {
+      print "\nCRON Reloaded system crontab $Reloads Time(s)\n";
+   }
+}
+
+if (keys %WFO) {
+  foreach $i (keys %WFO) {
+     printf "\n Wrong file owner (". $i ."): " . $WFO{$i}. " Time(s)\n";
+  }
+}
+
+if ($Ntpdate) {
+   print "\nNtpdate: adjusted $Ntpdate times\n";
+   print "\tMinimum offset $ntpdateminoffset\n";
+   print "\tMaximum offset $ntpdatemaxoffset\n";
+}
+
+if($ntpdatenosync) {
+   print "\nNtpDate could not sync: $ntpdatenosync times\n";
+}
+
+if ($INCRONDSS) {
+  printf "\n  service incrond started " . $INCRONDSS . ": time(s)\n";
+}
+
+if ($INCRONDStS) {
+  printf "\n  service incrond stoped " . $INCRONDStS . ": time(s)\n";
+}
+
+if ((%INCRONDSTCr) || (%INCRONDUTCr)) {
+  printf "\n  created tables \n";
+  for $key (keys %INCRONDSTCr) {
+    print "    system table " . $key . " created " . $INCRONDSTCr{$key} . ": time(s)\n";
+  }
+  for $key (keys %INCRONDUTCr) {
+    print "    table for user " . $key . " ceated " . $INCRONDUTCr{$key}. ": time(s)\n";
+  }
+}
+
+if ((%INCRONDSTCh) || (%INCRONDUTCh)) {
+  printf "\n  changes of tables \n";
+  for $key (keys %INCRONDSTCh) {
+    print "    system table " . $key . " changed " . $INCRONDSTCh{$key} . ": time(s)\n";
+  }
+  for $key (keys %INCRONDUTCh) {
+    print "    table for user " . $key . "changed " . $INCRONDUTCh{$key} . ": time(s)\n";
+  }
+}
+
+if ((%INCRONDSTDe) || (%INCRONDUTDe)) {
+  printf "\n  destroyed tables \n";
+  for $key (keys %INCRONDSTDe) {
+     print "    system table " . $key . " destroyed " . $INCRONDSTDe{$key} . ": time(s)\n";
+  }
+  for $key (keys %INCRONDUTDe) {
+     print "    table for user ". $key ." destroyed " .$INCRONDUTDe{$key} . ": time(s)\n";
+  }
+}
+
+if (%CRONDErr) {
+  printf "\n  crond daemon errors \n";
+  for $key (keys %CRONDErr) {
+    print "    " . $key . ": " . $CRONDErr{$key} . " time(s)\n";
+  }
+}
+
+if (%INCRONDErr) {
+  printf "\n  incrond daemon errors \n";
+  for $key (keys %INCRONDErr) {
+    print "    " . $key . ": " . $INCRONDErr{$key} . " time(s)\n";
+  }
+}
+
+if (%SELCONTErr) {
+  printf "\n  SELinux context error \n";
+  for $key (keys %SELCONTErr) {
+    print "    " . $key . ": " . $SELCONTErr{$key} . " time(s)\n";
+  }
+}
+
+if ($PAMAUTHErr) {
+   printf "\nPAM autentification error: " . $PAMAUTHErr . " time(s)\n";
+}
+
+if (%CHDIRErr) {
+   printf "\nchdir command failed\n";
+   foreach (keys %CHDIRErr) {
+      my ($File,$Cause) = split ",";
+      print "    for directory " . $File . " (" . $Cause . ")". ": " . $CHDIRErr{"$File,$Cause"} . " time(s)\n";
+   }
+}
+
+if ($CHUSERHErr) {
+   printf "\nUser change error: " . $CHUSERHErr . " time(s)\n";
+}
+
+if ($#OtherList >= 0) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

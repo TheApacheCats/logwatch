@@ -1,0 +1,289 @@
+##########################################################################
+# $Id: imapd,v 1.16 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+
+########################################################
+# The imap script was written by:
+#    Pawe³ Go³aszewski <blues@gda.pl>
+########################################################
+
+#####################################################
+## Copyright (c) 2008 Pawe³ Go³aszewski
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'};
+my $Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'};
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG \n\n";
+}
+
+while (defined($ThisLine = <STDIN>)) {
+   if (
+      ($ThisLine =~ /^Initializing */) or
+      ($ThisLine =~ /^spgetpwnam: can't find user: */) or
+      ($ThisLine =~ /^couriertls: read: Connection reset by peer/ ) or
+      # timeouts are reported in some other scripts - maybe it should be here too?
+      ($ThisLine =~ /^couriertls: read: Connection timed out/ ) or
+      ($ThisLine =~ /^LOGOUT, ip=\[.*\], rcvd=\d+, sent=\d+$/) or
+      ($ThisLine =~ /^Disconnected, ip=\[.*\]/) or
+      # uw-imapd
+      ($ThisLine =~ /^Moved \d+ bytes of new mail to.*$/) or
+      ($ThisLine =~ /^Unexpected client disconnect, while reading line.*$/)
+   ) {
+      # Don't care about these...
+   } elsif ( ($User, $Host) = ( $ThisLine =~ /^Login user=(.*?) host=(.*\[.*\])$/ ) ) {
+      $Login{$User}{$Host}++;
+   } elsif ( ($User, $Host) = ( $ThisLine =~ /^LOGIN, user=(.*?), ip=\[([^ ,]+)\](?:, port=\[\d+\])?, protocol=IMAP$/o ) ) {
+      $Login{$User}{$Host}++;
+   } elsif ( ($User,$Host) = ( $ThisLine =~ /^Authenticated user=(.*) host=(.*\[.*\]).*$/ ) ) {
+      $Login{$User}{$Host}++;
+   } elsif ( ($User,$Host) = ( $ThisLine =~ /^Preauthenticated user=(.*) host=(.*)$/ ) ) {
+      $Login{$User}{$Host}++;
+   } elsif ( ($Host) = ( $ThisLine =~ /^imap service init from (.*)$/ ) ) {
+      $ConnectionNonSSL{$Host}++;
+      $Connection{$Host}++;
+   } elsif ( ($Host) = ( $ThisLine =~ /^imaps SSL service init from (.*)$/ ) ) {
+      $ConnectionSSL{$Host}++;
+      $Connection{$Host}++;
+   } elsif ( ($Host) = ( $ThisLine =~ /^Connection, ip=\[(.*)\]$/o ) ) {
+      $Connection{$Host}++;
+#   } elsif ( ($User,$Downloaded,$DownloadSize,$Left,$LeftSize) = ( $ThisLine =~ /^Stats: (.*?) (.*?) (.*?) (.*?) (.*?)$/) ) {
+#      $DownloadedMessages{$User} += $Downloaded;
+#      $DownloadedMessagesSize{$User} += $DownloadSize;
+#      $MessagesLeft{$User} = $Left;
+#      $MboxSize{$User} = $LeftSize;
+#   } elsif ( ($User,$Host) = ( $ThisLine =~ /^authentication failed for user (.*?) - (.*)/ ) ) {
+#      $LoginFailed{"$Host ($User)"}++;
+   } elsif ( ($User, $Host) = ( $ThisLine =~ /^Logout user=(.*?) host=(.*\[.*\])$/) ) {
+      $Logout{$User}{$Host}++;
+      $Logout2{$User}++;
+   # More generic pattern for uw-imapd
+   } elsif ( ($User, $Host) = ( $ThisLine =~ /^Logout user=(.*?) host=(.*)$/) ) {
+      $Logout{$User}{$Host}++;
+      $Logout2{$User}++;
+   } elsif ( ($dummy, $User, $Host, $DownloadSize1, $DownloadSize2) = ( $ThisLine =~ /^(LOGOUT|TIMEOUT|DISCONNECTED), user=(.*?), ip=\[([^ ,]+)\](?:, port=\[\d+\])?, headers=(\d+), body=(\d+)/o ) ) {
+      $Logout{$User}{$Host}++;
+      $Logout2{$User}++;
+      $DownloadedMessagesSize{$User} += $DownloadSize1 + $DownloadSize2;
+      if ( ( $ThisLine =~ /, starttls=1/o ) ) {
+         $ConnectionSSL{$Host}++;
+      } else {
+         $Connection{$Host}++;
+      }
+   } elsif ( ($User,$Host) = ( $ThisLine =~ /^Autologout user=(.*) host=(.*\[.*\])$/ ) ) {
+      $AutoLogout{$User}{$Host}++;
+      $Logout{$User}{$Host}++;
+      $Logout2{$User}++;
+   } elsif ( ($Reason,$User,$Host) = ( $ThisLine =~ /^Killed (.*) user=(.*) host=(.*\[.*\])$/ ) ) {
+      $Logout{$User}{$Host}++;
+      $Logout2{$User}++;
+      $KilledSession{$User}{$Reason}++;
+   } elsif (
+      (($User,$Host) = ( $ThisLine =~ /^Broken pipe, while reading line user=(.*) host=(.*\[.*\])$/ )) or
+      (($User,$Host) = ( $ThisLine =~ /^Command stream end of file, while reading line user=(.*) host=(.*\[.*\])$/ )) or
+      (($User,$Host) = ( $ThisLine =~ /^Connection (?:reset by peer|timed out), while reading line user=(.*) host=(.*\[.*\])$/ )) or
+      (($User,$Host) = ( $ThisLine =~ /^No route to host, while reading line user=(.*) host=(.*\[.*\])$/ )) or
+      (($User,$Host) = ( $ThisLine =~ /^Unexpected client disconnect, while reading line user=(.*) host=(.*\[.*\])$/ ))
+   ) {
+      $Logout{$User}{$Host}++;
+      $Logout2{$User}++;
+      $SocketErrors{$Host}++;
+   } else {
+      # Report any unmatched entries...
+      # remove PID from named messages
+
+      $ThisLine =~ s/^(client [.0-9]+)\S+/$1/;
+      chomp($ThisLine);
+      $OtherList{$ThisLine}++;
+   }
+   $LastLine = $ThisLine;
+}
+
+################################################
+
+
+if ( ( $Detail >= 0 ) and (keys %LoginFailed)) {
+   print    "\n\n[IMAPd] Login failures:".
+            "\n=========================".
+            "\n                                                  Host (user) |          # ".
+            "\n------------------------------------------------------------- | -----------";
+
+   $ConnCount = 0;
+   foreach $Host (sort keys %LoginFailed) {
+      $Conns = $LoginFailed{$Host};
+      $HostLength = length($Host);
+      $HostSpaceLength = 61 - $HostLength;
+      $CountLength = length("$Conns");
+      $CountSpaceLength = 12 - $CountLength;
+      print "\n" ." " x $HostSpaceLength . $Host . " |" . " " x $CountSpaceLength .  $Conns . "";
+      $ConnCount += $Conns;
+   }
+   $CountLength = length("$ConnCount");
+   $CountSpaceLength = 75 - $CountLength;
+   print "\n" . "-" x 75;
+   print "\n" . " " x $CountSpaceLength . "$ConnCount\n\n\n";
+}
+
+if ( ( $Detail >= 5 ) and (keys %Connection)) {
+   print     "\n[IMAPd] Connections:".
+             "\n=========================".
+             "\n                                  Host | Connections |    SSL   |   Total  ".
+             "\n-------------------------------------- | ----------- | -------- | ---------";
+
+   $ConnCount = 0;
+   $SSLConn = 0;
+   $TotalConn = 0;
+   foreach $Host (sort keys %Connection) {
+      $Total = $Connection{$Host};
+      if (defined ($ConnectionNonSSL{$Host})) {
+         $Conns = $ConnectionNonSSL{$Host};
+      } else {
+         $Conns = 0;
+      }
+      if (defined ($ConnectionSSL{$Host})) {
+         $SSL = $ConnectionSSL{$Host};
+      } else {
+         $SSL = 0;
+      }
+      $HostLength = length($Host);
+      $HostSpaceLength = 38 - $HostLength;
+      $CountLength = length("$Conns");
+      $CountSpaceLength = 12 - $CountLength;
+      $SSLLength = length("$SSL");
+      $SSLSpaceLength = 9 - $SSLLength;
+      $TotalLenght = length("$Total");
+      $TotalSpaceLength = 10 - $TotalLenght;
+      print "\n" ." " x $HostSpaceLength . $Host . " |" . " " x $CountSpaceLength .  $Conns .
+            " |" . " " x $SSLSpaceLength . $SSL . " |" . " " x $TotalSpaceLength . $Total;
+      $NonSSLCount += $Conns;
+      $SSLCount += $SSL;
+      $TotalCount += $Total;
+   }
+   $NonSSLLength = length("$NonSSLCount");
+   $NonSSLSpaceLength = 52 - $NonSSLLength;
+   $SSLLength = length("$SSLCount");
+   $SSLSpaceLength = 9 - $SSLLength;
+   $TotalLength = length("$TotalCount");
+   $totalSpaceLength = 10 - $TotalLength;
+   print "\n" . "-" x 75;
+   print "\n" . " " x $NonSSLSpaceLength . $NonSSLCount . " |" . " " x $SSLSpaceLength . $SSLCount .
+                " |" . " " x $totalSpaceLength . $TotalCount . "\n\n\n";
+}
+
+
+
+if (keys %Logout2) {
+   print     "\n[IMAPd] Logout stats:".
+             "\n====================".
+             "\n                                   User | Logouts | Downloaded |  Mbox Size".
+             "\n--------------------------------------- | ------- | ---------- | ----------";
+
+   $ConnCount = 0;
+   $SizeAll = 0;
+   $DownAll = 0;
+   foreach $User (sort keys %Logout2) {
+      $Conns = $Logout2{$User};
+      $UserLength = length($User);
+      $UserSpaceLength = 39 - $UserLength;
+      $CountLength = length("$Conns");
+      $CountSpaceLength = 8 - $CountLength;
+      $Down = $DownloadedMessagesSize{$User};
+      if (! defined $Down) {
+         $Down = 0; #Hack
+      }
+      $DownSpaceLength = 11 - length($Down);
+      #$Size = $MboxSize{$User};
+      $Size = 0; #Hack
+      $SizeSpaceLength = 11 - length($Size);
+      print "\n" ." " x $UserSpaceLength . $User . " |" . " " x $CountSpaceLength .  $Conns . " |" .
+                  " " x $DownSpaceLength . $Down . " |" . " " x $SizeSpaceLength . $Size;
+      $ConnCount += $Conns;
+      $SizeAll += $Size;
+      $DownAll += $Down;
+   }
+   $CountLength = length("$ConnCount");
+   $CountSpaceLength = 49 - $CountLength;
+   $DownLength = length($DownAll);
+   $DownSpaceLength = 11 - $DownLength;
+   $SizeLength = length($SizeAll);
+   $SizeSpaceLength = 11 - $SizeLength;
+   print "\n" . "-" x 75;
+   print "\n" . " " x $CountSpaceLength . "$ConnCount" . " |" . " " x $DownSpaceLength . $DownAll . " |" .
+                " " x $SizeSpaceLength  .  $SizeAll    . "\n\n\n";
+}
+
+
+if ( ( $Detail >= 10 ) and (keys %Login)) {
+   print "\n[IMAPd] Successful Logins:\n";
+   $LoginCount = 0;
+   foreach my $User (sort keys %Login) {
+      print "  User $User: \n";
+      $UserCount = 0;
+      foreach $Host (keys %{$Login{$User}}) {
+         $HostCount = $Login{$User}{$Host};
+         print "    From $Host: $HostCount Time(s)\n";
+         $UserCount += $HostCount;
+      }
+      $LoginCount += $UserCount;
+      print "  Total $UserCount Time(s)\n";
+      print "\n";
+   }
+   print "Total $LoginCount successful logins\n\n";
+}
+
+if ( ( $Detail >= 10 ) and (keys %AutoLogout)) {
+   print "\nAutologout:\n";
+   foreach $User (sort {$a cmp $b} keys %AutoLogout) {
+      print "   $User:\n";
+      foreach $Host (sort {$a cmp $b} keys %{$AutoLogout{$User}}) {
+         print "      $Host: $AutoLogout{$User}{$Host} Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 10 ) and (keys %KilledSession)) {
+   print "\nKilled IMAP sessions:\n";
+   foreach $User (sort {$a cmp $b} keys %KilledSession) {
+      print "   $User:\n";
+      foreach $Reason (sort {$a cmp $b} keys %{$KilledSession{$User}}) {
+         print "      $Reason: $KilledSession{$User}{$Reason} Time(s)\n";
+      }
+   }
+}
+
+if ( ( $Detail >= 10 ) and (keys %SocketErrors)) {
+   print "\nSocket Errors in connections with:\n";
+   foreach $Host (sort {$a cmp $b} keys %SocketErrors) {
+      print "   $Host: $SocketErrors{$Host} Time(s)\n";
+   }
+}
+
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $line (sort {$a cmp $b} keys %OtherList) {
+      print "   $line: $OtherList{$line} Time(s)\n";
+   }
+}
+
+exit(0);
+
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

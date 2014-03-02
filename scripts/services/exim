@@ -1,0 +1,721 @@
+##########################################################################
+# $Id: exim,v 1.25 2010/09/18 17:31:00 stefan Exp $
+##########################################################################
+# $Log: exim,v $
+# Revision 1.25  2010/09/18 17:31:00 stefan
+# removing unused variable $tz
+#
+# Revision 1.24  2009/06/02 14:50:37  mike
+# Patch from Fedora (Ivan Varekova) -mgt
+#
+# Revision 1.23  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.22  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.21  2008/01/16 20:29:18  bjorn
+# Optimizing by using push, as per Steve Holden.
+#
+# Revision 1.20  2007/02/11 01:50:47  bjorn
+# New handling of problem addresses, DNSBL warnings, and other transaction
+# and connection errors, by Nigel Metheringham
+#
+# Revision 1.19  2006/08/23 21:19:02  bjorn
+# Process Greylisting, by Jan Pazdziora.
+#
+# Revision 1.18  2006/03/02 16:22:23  bjorn
+# Additional error detection, by Gary Allen Vollink.
+#
+# Revision 1.17  2005/11/02 17:03:12  bjorn
+# Additional patches, from Ruth Ivimey-Cook.
+#
+# Revision 1.16  2005/11/02 16:05:18  bjorn
+# Significant expansion of detecting and reporting error messages, by
+# Ruth Ivimey-Cook; deleted redundant errors, by Gary Allen Vollink
+#
+# Revision 1.15  2005/09/27 19:52:42  bjorn
+# Handle reverse lookup failures, by Stig Brautaset
+#
+# Revision 1.14  2005/05/25 23:09:28  bjorn
+# Added filters for malware/viruses, and protocol errors, by Gary Allen Vollink.
+#
+##########################################################################
+
+########################################################
+# Originally written by:
+#    Dariusz Nierada <dnierada@kat.supermedia.pl>
+########################################################
+# Please send all comments, suggestions, bug reports,
+#    etc, to logwatch-devel@lists.sourceforge.net
+########################################################
+
+########################################################
+# Default Detail Levels:
+#     0: Prints MisFormatted log lines (should never happen)
+#        Virus/Malware blocks (if AntiVirus configured)
+#        Prints protocol violations (by category)
+#        Prints address verification rejections
+#        Prints administrative rejections (by category)
+#        Prints Refused Relay count
+#
+#     5: Prints Queue Run count
+#        Prints server Stop/Start
+#
+#    10: Prints Refused Relay (individual lines)
+#        Prints Per Message Tracking
+########################################################
+
+########################################################
+## Copyright (c) 2008 Gary Allen Vollink
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':dates';
+use warnings;
+
+$Detail       = $ENV{'LOGWATCH_DETAIL_LEVEL'}  || 0;
+
+$LvlBadFormat    = $ENV{'exim_misformat'}     || 0;
+$LvlRestarts     = $ENV{'exim_restart'}       || 5;
+$LvlVirus        = $ENV{'exim_virus'}         || 0;
+$LvlProtocl      = $ENV{'exim_protocol'}      || 0;
+$LvlProtoclLines = $ENV{'exim_protocol_lines'}|| 5;
+$LvlDontAccept   = $ENV{'exim_dontaccept'}    || 0;
+$LvlDontAcceptLines = $ENV{'exim_dontaccept_lines'}    || 0;
+$LvlVerify       = $ENV{'exim_verify'}        || 0;
+$LvlVerifyLines  = $ENV{'exim_verify_lines'}  || 5;
+$LvlRuns         = $ENV{'exim_runs'}          || 5;
+$LvlRelay        = $ENV{'exim_relay'}         || 0;
+$LvlRelayLines   = $ENV{'exim_relay_lines'}   || 10;
+$LvlMsgs         = $ENV{'exim_mesgs'}         || 10;
+
+# procedura sortujaca tak jak ja chce (bo tamta sotrowala po ASCII)
+# procedure to compare numbers at the beginning of submitted strings.
+#  .. Which in this case is the message count for a given message ID.
+sub wedlug_liczb {
+    ($aa) = ($a =~ /^(\d+).+/);
+    ($bb) = ($b =~ /^(\d+).+/);
+    $aa <=> $bb;
+}
+
+# START
+
+my $SearchDate = TimeFilter("%Y-%m-%d %H:%M:%S");
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+    # pobierz dzisiejsza date z 2002-03-31 22:13:48 ...
+    # Collect this line's date, e.g. 2002-03-31 22:13:48 ...
+   do {
+      $BadFormat{$ThisLine}++;
+      next;
+   } unless ($year1,$month1,$day1,$h1,$m1,$s1) = ($ThisLine =~ /^(\d+)\-(\d+)\-(\d+)\s(\d+):(\d+):(\d+)\s.+/);
+
+   next unless $ThisLine =~ /^$SearchDate /o;
+
+   if ( $ThisLine =~ /End queue run\:/ ) {
+      $EndQueue++;
+   }
+   elsif ( $ThisLine =~ /Start queue run\:/ ) {
+      $StartQueue++;
+   }
+   elsif ( $ThisLine =~ /sender verify defer/ ) {
+      # ignore this; it's temporary
+   }
+   elsif ( $ThisLine =~ /unknown variable name/ ) {
+      # ignore this temporarily
+   }
+   elsif ( $ThisLine =~ /ignoring AUTH=.*? \(client not authenticated\)/ ) {
+      # ignore this; it is a warning.
+   }
+   elsif ( $ThisLine =~ /cwd=.*? \d args: / ) {
+      # ignore this; it is exim (or an Exim sub-command) starting.
+   }
+   elsif ( $ThisLine =~ /[Rr]ecipient verify fail/ ) {
+      $RecipVerify{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /[Ss]ender verify fail/ ) {
+      $SendVerify{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /fragments administratively prohib/ ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /unqualified (sender|recipient) rejected/ ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /do not accept mail / ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /believed to be spam/ ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /[Ww]arning: dnsbl\.sorbs\.net/ ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /mail not permitted from/ ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /file, which is blacklisted/ ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /not accept Windows executables/ ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /remote host address is the local host/ ) {
+      $DontAccept{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /message contains malware/ ) {
+      # Exim <= 4.44 with ExiScan-ACL Patch (Running AntiVirus Software)
+      $Virus{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /message contains a [vV]irus/ ) {
+      # Exim >= 4.50 compiled with WITH_CONTENT_SCAN=yes (Running AntiVirus Software)
+      $Virus{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /SMTP connection from/ ) {
+      # Common error from SPAM hosts.
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /SMTP syntax error in/ ) {
+      # Common error from SPAM hosts.
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /remote host used my name in HELO/ ) {
+      # Common error from SPAM hosts.
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /remote host used IP address in HELO/ ) {
+      # Common error from SPAM hosts.
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /unexpected disconnection while reading SMTP command/ ) {
+      # Common error from SPAM hosts.
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /SMTP protocol violation/ ) {
+      # Common error from SPAM hosts.
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /SMTP command timeout/ ) {
+      # Common error from SPAM hosts.
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /SMTP data timeout/ ) {
+      # Common error from SPAM hosts.
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /incomplete transaction \(([\s\w]+)\) from/ ) {
+      # Common error from SPAM hosts (after recipient reject/callout).
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /SMTP protocol synchronization error \(([\s\w:]+)\):/ ) {
+      # Spammer who does not wait before sending crap
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /dropped: too many nonmail commands/ ) {
+      # Often someone who tries lots of transactions
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /dropped: too many syntax or protocol errors/ ) {
+      # Often someone who tries lots of transactions
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /SMTP protocol error in \"\w+\"/ ) {
+      # Some hosts ask for TLS even when not offered (generalised to all cmds)
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /Connection from .* too many connections from that IP address/ ) {
+      # Some hosts make lots of simultaneous connections
+	  # this is an extra error message when logging is high
+	  # and since another message duplicates it, we can just ignore this
+   }
+   elsif ( $ThisLine =~ /rejected [HE][EH]LO from\s/ ) {
+      # Typically due to underscores _ in the HELO line
+      #   (a common protocol violation)
+      # Also can be due to odd escape sequences
+      #   (never seen from a valid MX)
+      $Proto{$ThisLine}++;
+   }
+   elsif ( $ThisLine =~ /SIGHUP received\: re-exec/ ) {
+      push @Restart, "$year1-$month1-$day1 $h1:$m1:$s1 (stop)";
+   }
+   elsif ( $ThisLine =~ /daemon started\:/ ) {
+      push @Restart, "$year1-$month1-$day1 $h1:$m1:$s1 (start)";
+   }
+   elsif ( $ThisLine =~ /rejected RCPT.*greylist/) {
+      $Greylist++;
+      push @GreylistH, $ThisLine;
+   }
+   elsif ( $ThisLine =~ /refused relay/ || $ThisLine =~ /rejected RCPT/ ) {
+      $Relay++;
+      push @RelayH, $ThisLine;
+   }
+   elsif ( $ThisLine =~ /no host name found for IP address/ ) {
+      $ReverseLookup++;
+      push @ReverseLookupH, $ThisLine;
+   }
+   elsif ( $ThisLine =~ /no IP address found for host/ ) {
+      $Lookup++;
+      push @LookupH, $ThisLine;
+   }
+   elsif ( $ThisLine =~ /^\d+\-\d+\-\d+\s\d+\:\d+\:\d+\s(\+\d+\s)?\w+\-\w+\-\w+\s/ ) { # inne wiadomosci przesylane przez EXIMA
+    # Collect Message ID specific notes...
+    ($mdate,$mtime,$mid,$mrest) = ($ThisLine =~ /^(\d+\-\d+\-\d+)\s(\d+\:\d+\:\d+)\s(?:\+\d+\s)?(\w+\-\w+\-\w+)(.+)/);
+      # Count of individual Message Lines, used for sort
+    $licze++;         # Dodaje taki licznik aby potem przy wypisaniu posortowac po nim, bo wypisywal nie po kolei
+    $mmsg{$mid}{$licze.$mrest} = "$mdate $mtime";
+
+   }
+   else
+   {
+      $OtherList{$ThisLine}++;
+   }
+} #end while
+
+# Print MisFormatted log lines (should never happen)
+if ($Detail >= $LvlBadFormat) {
+   if (%BadFormat) {
+      print "\n***** BAD FORMAT (Possible data corruption or Exim bug) *****\n";
+      foreach $ThisOne (keys %BadFormat) {
+         print "$ThisOne\n";
+      }
+   }
+}
+
+# Print server Stops/Starts
+if ($Detail >= $LvlRestarts) {
+   if (@Restart) {
+      print "\n--- Exim Restarted ---\n";
+      foreach $ThisOne (sort @Restart) {
+         print "  $ThisOne\n";
+      }
+   }
+}
+
+if ($Detail >= $LvlRuns) {
+   if (($StartQueue >0 ) or ($EndQueue > 0)) {
+      print "\n--- Queue Runners ---\n";
+      # Start Queue
+      $StartQueue and print "  Start queue run: $StartQueue Time(s)\n";
+      # End Queue
+      $EndQueue and print "  End queue run: $EndQueue Time(s)\n";
+   }
+}
+
+if ($Detail >= $LvlVerify) {
+   if ((@SendVerify) and (@RecipVerify)) {
+      print "\n--- Address Verification ---\n";
+   }
+   if (@SendVerify) {
+      # Sender Verifies
+      $SendVerify and print "\nSender Verify failures: $SendVerify Time(s)\n";
+
+      if ($Detail >= $LvlVerifyLines) {
+         foreach $ThisOne (@SendVerify) {
+            print "  $ThisOne\n";
+         }
+      }
+   }
+   if (@RecipVerify) {
+      # Recip Verifies
+      $RecipVerify and print "Recipient Verify failures: $RecipVerify Time(s)\n";
+
+      if ($Detail >= $LvlVerifyLines) {
+         foreach $ThisOne (@RecipVerify) {
+            print "  $ThisOne\n";
+         }
+      }
+   }
+}
+
+if ($Detail >= $LvlRelay) {
+   if (@GreylistH) {
+
+      print "\n--- Greylisted $Greylist times\n";
+
+      if ( $Detail >= $LvlRelayLines ) {
+         print   "--- Lines follow:\n\n";
+
+         foreach $ThisOne (@GreylistH) {
+            print "$ThisOne\n";
+         }
+      }
+   }
+   if (@RelayH) {
+
+      print "\n--- Refused Relays $Relay times\n";
+
+      if ( $Detail >= $LvlRelayLines ) {
+         print   "--- Lines follow:\n\n";
+
+         foreach $ThisOne (@RelayH) {
+            print "$ThisOne\n";
+         }
+      }
+   }
+}
+
+if ($Detail >= $LvlVirus) {
+   # Print Blocked Viruses/Malware
+   if (%Virus) {
+      my (%vir);
+      print "\n--- Virus/Malware Blocked ---\n";
+      foreach $ThisOne (sort(keys %Virus)) {
+         # Need mid empty...
+         $mid = "";
+         # Virus name holder...
+         $cc = "";
+         # Extract exim date and time string...
+         ($mdate, $mtime) = ($ThisOne =~ m/^(\d+-\d+-\d+)\s(\d+\:\d+\:\d+)\s/);
+         # Link date and time (looks cleaner)...
+         $aa = "$mdate $mtime";
+         # Extract the REAL IP address...
+         ($bb) = ($ThisOne =~ m/\s\[(\d+\.\d+\.\d+\.\d+)\]\s/);
+            # Exim >= 4.50 compiled with, WITH_CONTENT_SCAN=yes
+         # Default warning looks like this...
+            # rejected after DATA: This message contains a [vV]irus (%s).
+         if ($ThisOne =~ m/virus \((.*?)\)/) {
+            $cc = $1;
+         }
+            # Exim <= 4.44 with ExiScan-ACL patch
+            # rejected after DATA: This message contains malware (%s)
+         elsif ($ThisOne =~ m/malware \((.*?)\)/) {
+            $cc = $1;
+         }
+         # There is probably a more graceful way to do this...
+         if (defined( $vir{$cc} )) {
+            # Assign current value to temporary (mid)
+            $mid = $vir{$cc};
+         }
+         # Set current value to (old value)+new value+','
+         $vir{$cc} = "$mid$aa : IP:$bb,";
+      }
+      # Print the results...
+      foreach $ThisOne (sort(keys %vir)) {
+         print "Virus: [$ThisOne]\n";
+         foreach $aa ( sort( split /,/, $vir{$ThisOne} )) {
+            print "   $aa\n";
+         }
+      }
+   }
+}
+
+if ($Detail >= $LvlDontAccept) {
+   # Print Administrative Prohibitions
+   if (%DontAccept) {
+      my (%spam);
+      my (@errList);
+
+      # Probable SPAM hosts...
+      print "\n--- Admin Policy Blocking ---\n";
+      foreach $ThisOne (sort(keys %DontAccept)) {
+         # We need this blank.
+         $mid = "";
+         # IP address/current issue holder.
+         $bb = "";
+         # Extract exim date and time string...
+         ($mdate, $mtime) = ($ThisOne =~ m/^(\d+-\d+-\d+)\s(\d+\:\d+\:\d+)\s/);
+         # Link date and time (looks cleaner)...
+         $aa = "$mdate $mtime";
+
+         if ( $ThisOne =~ m/do not accept mail from ([\w\*-._]+)@([\w.-_]+)/ ) {
+            $cc = "Blocked Email Domain";
+            $bb = "$1\@$2";
+         }
+         elsif ( $ThisOne =~ m/mail not permitted from sender ([\w\*-_.]+)@([\w.-_]+)/ ) {
+            $cc = "Blocked Email Address";
+            $bb = "$1\@$2";
+         }
+         elsif ( $ThisOne =~ m/contains attached ".(.*)" file, which is blacklisted/ ) {
+            $cc = "Blocked Attachment";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /believed to be spam/ ) {
+            $cc = "Blocked Fragmented Message";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /[Ww]arning: dnsbl\.sorbs\.net/ ) {
+            $cc = "Blocked by DNSBL (SORBS)";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /fragments administratively prohibited/ ) {
+            $cc = "Blocked Fragmented Message";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ m/unqualified sender rejected: <(.*)>/ ) {
+            $cc = "Unqualified Sender";
+            $bb = "$1";
+         }
+         elsif ( $ThisOne =~ m/unqualified recipient rejected: <(.*)>/ ) {
+            $cc = "Unqualified Receipient";
+            $bb = "$1";
+         }
+         elsif ( $ThisOne =~ m/not accept Windows executables/ ) {
+            $cc = "Blocked Attachment";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ m/remote host address is the local host/ ) {
+            $cc = "Invalid local domain";
+            ( $bb ) = ($ThisOne =~ m/\@\[^>]+/);
+         }
+         else {
+            # If we picked up a malfunction but didn't collect it here,
+            # no need to make the user suffer with superfluous error
+            # messages.
+            #next;
+            print "Didn't Summarize: $ThisOne\n";
+         }
+         if (defined( $spam{$cc} )) {
+            $mid = $spam{$cc};
+         }
+         $spam{$cc} = "$mid$aa : $bb,";
+      }
+      foreach $ThisOne (sort(keys %spam)) {
+         if ($Detail >= $LvlDontAcceptLines) {
+            print "  $ThisOne\n";
+            foreach $aa ( sort( split /,/, $spam{$ThisOne} )) {
+               print "    $aa\n";
+            }
+         }
+         else {
+            @errList = split /,/, $spam{$ThisOne};
+            print "  $ThisOne ".scalar @errList." times\n";
+         }
+      }
+   }
+}
+
+if ($Detail >= $LvlProtocl) {
+# Print Protocol Violations
+   if (%Proto) {
+      my (%spam);
+
+      # Probable SPAM hosts...
+      print "\n--- Bad Hosts ---\n";
+      foreach $ThisOne (sort(keys %Proto)) {
+         # We need this blank.
+         $mid = "";
+         # IP address/current issue holder.
+         $bb = "";
+         $cc = "";
+         # Extract exim date and time string...
+         ($mdate, $mtime) = ($ThisOne =~ m/^(\d+-\d+-\d+)\s(\d+\:\d+\:\d+)\s/);
+         # Link date and time (looks cleaner)...
+         $aa = "$mdate $mtime";
+
+         if ( $ThisOne =~ m/SMTP protocol violation\:\s(.*?\(.*?\))\:/ ) {
+            $cc = $1;
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /unexpected disconnection while reading SMTP command/ ) {
+            $cc = "Sudden disconnect while expecting remote input";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ m/rejected ([HE][EH])LO from \[(\d+\.\d+\.\d+\.\d+)\]\:\s(.*?):\s(.*?)$/ ) {
+            $cc = "Rejected HELO/EHLO: $3";
+            $bb = "$2 ($1LO $4)";
+         }
+         elsif ( $ThisOne =~ /SMTP data timeout \(message abandoned\) on connection from/ ) {
+            $cc = "SMTP Timeout errors";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /SMTP command timeout on connection from/ ) {
+            $cc = "SMTP Timeout errors";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /syntactically invalid argument/ ) {
+            $cc = "SMTP Syntax errors";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /SMTP syntax error in/ ) {
+            $cc = "SMTP Syntax errors";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /remote host used my name in HELO/ ) {
+            $cc = "My name in HELO";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /remote host used IP address in HELO/ ) {
+            $cc = "IP address in HELO";
+            ( $bb ) = ($ThisOne =~ m/\[(\d+\.\d+\.\d+\.\d+)\]/);
+         }
+         elsif ( $ThisOne =~ /incomplete transaction (\(.*\))/ ) {
+            $bb = "SMTP transaction cut short $1";
+            $SmtpConnection{$bb}++;
+         }
+         elsif ( $ThisOne =~ /SMTP protocol synchronization error/ ) {
+            $bb = "SMTP protocol synchronization error";
+            $SmtpConnection{$bb}++;
+         }
+         elsif ( $ThisOne =~ /dropped: too many nonmail commands/ ) {
+            $bb = "Connection dropped after too many nonmail SMTP commands";
+            $SmtpConnection{$bb}++;
+         }
+         elsif ( $ThisOne =~ /dropped: too many syntax or protocol errors/ ) {
+            $bb = "Connection dropped after too many syntax/protocol errors";
+            $SmtpConnection{$bb}++;
+         }
+         elsif ( $ThisOne =~ /(SMTP protocol error in \"\w+\")/ ) {
+            $bb = $1;
+            $SmtpConnection{$bb}++;
+         }
+         elsif ( $ThisOne =~ /SMTP connection from/ ) {
+            if ( $ThisOne =~ /lost while reading message data/ ) {
+               $bb = "SMTP connection lost while reading message data";
+            }
+            elsif ( $ThisOne =~ /Connection reset by peer/ ) {
+               $bb = "SMTP connection lost when connection reset by peer ";
+            }
+            elsif ( $ThisOne =~ /lost/ ) {
+               $bb = "SMTP connection lost (non-specific)";
+            }
+            elsif ( $ThisOne =~ /closed by QUIT/ ) {
+               $bb = "SMTP connection closed by QUIT";
+            }
+            elsif ( $ThisOne =~ /closed after SIGTERM/ ) {
+               $bb = "SMTP connection closed after SIGTERM";
+            }
+            elsif ( $ThisOne =~ /TCP\/IP connection count/ ) {
+               $bb = "SMTP connection TCP/IP connection count (warning)";
+            }
+            if ( $bb ne "" ) {
+               $SmtpConnection{$bb}++;
+            }
+         }
+         else {
+            # If we picked up a malfunction but didn't collect it here,
+            # no need to make the user suffer with superfluous error
+            # messages.
+            #next;
+            print "Didn't Summarize: $ThisOne\n";
+         }
+         if (defined( $spam{$cc} )) {
+            $mid = $spam{$cc};
+         }
+         # We're picking things up in this larger block that do not
+         #  ... fit into this mold, so - let's make sure that this is valid
+         #  ... before we set it:
+         if (( $cc ne '' ) && ( $bb ne '' )) {
+            $spam{$cc} = "$mid$aa : IP:$bb,";
+         }
+      }
+      foreach $ThisOne (sort(keys %spam)) {
+         if ($Detail >= $LvlProtoclLines) {
+            print " $ThisOne:\n";
+            foreach $aa ( sort( split /,/, $spam{$ThisOne} )) {
+               print "    $aa\n";
+            }
+         }
+         else {
+            @errList = split /,/, $spam{$ThisOne};
+            print "  $ThisOne ".scalar @errList." times\n";
+         }
+      }
+
+      if ( %SmtpConnection ) {
+         print "\n--- SMTP Connection Issues \n";
+         foreach $ThisOne (keys %SmtpConnection) {
+            $bb = $SmtpConnection{$ThisOne};
+            print "  $ThisOne: $bb Time(s)\n";
+         }
+      }
+
+      if (@ReverseLookupH) {
+         print "\n--- Failed Reverse Lookups \n";
+         print "--- $ReverseLookup  Time(s)\n\n";
+
+         if ($Detail >= $LvlProtoclLines) {
+            foreach $ThisOne (@ReverseLookupH) {
+               print "   $ThisOne\n";
+            }
+         }
+      }
+
+      if (@LookupH) {
+         print "\n--- Failed Reverse Lookups \n";
+         print "--- (eg. spam try): $Lookup  Time(s)\n\n";
+
+         if ($Detail >= $LvlProtoclLines) {
+            foreach $ThisOne (@LookupH) {
+               print "$ThisOne\n";
+            }
+         }
+      }
+   }
+}
+
+if ($Detail >= $LvlMsgs) {
+   # Messages by ID
+   if (keys %mmsg ) {
+      my $tmsgcount=0;
+      my $tmsgrcpts=0;
+      print "\n--- Messages history ---\n\n";
+      # mmsg is hashed by message id, which is sorted by time
+      foreach $tmsg (sort keys %mmsg) {
+        my @tmsgkeys = sort {wedlug_liczb} keys %{$mmsg{$tmsg}};
+        my $immed_deliv = 1;
+        $immed_deliv = 0 unless $tmsgkeys[0] =~ /^\d+ <=/;
+        foreach my $key (@tmsgkeys[1..$#tmsgkeys-1]) {
+         $immed_deliv = 0 unless $key =~ /^\d+ [-=]>/;
+        }
+        $immed_deliv = 0 unless $tmsgkeys[$#tmsgkeys] =~ /^\d+ Completed/;
+        my $qttmsgcount = 0;
+        my $oldqttmsg = '';
+        if (!$immed_deliv) {
+         print "\-MsgID: $tmsg\: \n";
+         foreach $ttmsg (@tmsgkeys) {
+             $qttmsg = $ttmsg;
+             $qttmsg =~ s/^\d+//; # wywal licznik na poczatku (te od sortowania)
+             $qttmsg =~ s/P\=e*smtp S.+//; # wywal koncowki typu:  P=smtp S=372023 id=
+             if ($oldqttmsg eq $qttmsg) {
+         $qttmsgcount++;
+             } else {
+         $oldqttmsg = $qttmsg;
+         if ($qttmsgcount > 0) {
+            print "\tlast message repeated $qttmsgcount times\n";
+            $qttmsgcount = 0;
+         }
+         print "\t$mmsg{$tmsg}{$ttmsg}$qttmsg\n";
+             }
+         }
+         if ($qttmsgcount > 0) {
+            print "\tlast message repeated $qttmsgcount times\n";
+         }
+        } else {
+         $tmsgcount++;
+         $tmsgrcpts+=$#tmsgkeys-1;
+        }
+      }
+      print "$tmsgcount messages delivered immediately ";
+      print "to $tmsgrcpts total recipients\n";
+   }
+}
+
+# INNE Badziewia
+if (keys %OtherList) {
+   print "\n**Unmatched Entries**\n";
+   foreach $line (sort {$a cmp $b} keys %OtherList) {
+      print "$line: $OtherList{$line} Time(s)\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

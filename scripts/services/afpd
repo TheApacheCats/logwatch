@@ -1,0 +1,68 @@
+##########################################################################
+# $Id: afpd,v 1.8 2008/03/24 23:31:26 kirk Exp $
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+$IgnoreUnmatched = $ENV{'afpd_ignore_unmatched'} || 0;
+
+while (defined($ThisLine = <STDIN>)) {
+   if ( ( $ThisLine =~ /^FTP session closed./ ) or
+         ( $ThisLine =~ /^(ANONYMOUS )?FTP login as \'.*\' from [^ ]+ \[.*\] to .*/ ) or
+         ( $ThisLine =~ /^FTP no transfer time out, disconnected\./ ) or
+         ( $ThisLine =~ /^PAM\(.*\): Authentication failure/ ) or
+         ( $ThisLine =~ /^data_sendfile/ ) or
+         ( $ThisLine =~ /^FTP no transfer timeout, disconnected\./ ) or
+         ( $ThisLine =~ /^FTP login timed out, disconnected\./ ) or
+         ( $ThisLine =~ /done/ ) or
+         ( $ThisLine =~ /server_child/ ) or
+         ( $ThisLine =~ /session from/ ) or
+         ( $ThisLine =~ /ASIP session/ ) or
+         ( $ThisLine =~ /logout/ )
+      ) {
+      # We don't care about these
+   }
+   elsif ( ($Login) = ( $ThisLine =~ /login ([^ ]+)/) ) {
+      $UserLogin{$Login}++;
+   }
+   else {
+      # Report any unmatched entries...
+      push @OtherList,$ThisLine;
+   }
+}
+
+if (keys %UserLogin) {
+   print "\nUsers Logged In:\n";
+   foreach $Line (keys %UserLogin) {
+      print "   $Line : $UserLogin{$Line} Time(s)\n";
+   }
+}
+
+if (($#OtherList >= 0) and (not $IgnoreUnmatched)) {
+   print "\n**Unmatched Entries**\n";
+   print @OtherList;
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

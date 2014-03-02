@@ -1,0 +1,1261 @@
+#!/usr/bin/perl
+##########################################################################
+# $Id: cisco,v 1.13 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: cisco,v $
+# Revision 1.13  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.12  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.11  2007/11/27 18:43:05  bjorn
+# Processing of additional statements (NTP, ACL), by Hugo van der Kooij.
+#
+##########################################################################
+
+########################################################
+# This was written and is maintained by:
+#    Laurent DUFOUR <laurent.dufour@havas.com>,<dufour_l@hotmail.com>
+# Heavily modified by:
+#    Hugo van der Kooij <hvdkooij@vanderkooij.org>
+#    based on the work of
+#    Kirk Bauer <kirk@kaybee.org>
+#
+# Please send all comments, suggestions, bug reports,
+#    etc, to laurent.dufour@havas.com and hvdkooij@vanderkooij.org
+########################################################
+
+########################################################
+## Copyright (c) 2008 Laurent DUFOUR
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':all';
+
+$Debug = ValueOrDefault($ENV{'LOGWATCH_DEBUG'}, 0);
+$Detail = ValueOrDefault($ENV{'LOGWATCH_DETAIL_LEVEL'}, 0);
+$CatchUnknown = ValueOrDefault($ENV{'catch_unknown'}, 1);
+
+# Avoid "Use of uninitialized value" warning messages.
+sub ValueOrDefault {
+    my ($value, $default) = @_;
+    return ($value ? $value : $default);
+}
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside CISCO Filter \n\n";
+    $DebugCounter = 1;
+}
+
+
+
+my ($month,$day,$time,$host,$process,$conn,$msg);
+
+while (defined($ThisLine = <STDIN>)) {
+    if ( $Debug >= 30 ) {
+        print STDERR "DEBUG($DebugCounter): $ThisLine";
+        $DebugCounter++;
+    }
+
+($month,$day,$time,$host,$process,$conn,$msg)=split(/ +/,$ThisLine,7);
+
+   if ( ($ThisLine =~ /(ISDN-6-.+)/ ) or
+         ($ThisLine =~ /Copyright/ ) or
+         ($ThisLine =~ /Cisco Internetwork Operating System Software/ ) or
+         ($ThisLine =~ /IOS \(tm\)/ ) or
+         ($ThisLine =~ /Cisco IOS/ ) or
+         ($ThisLine =~ /Technical Support/ ) or
+         ($ThisLine =~ /self test passed/ ) or
+         ($ThisLine =~ /TAC:Home:SW:IOS:Specials/ )
+    ) {
+      # don't care about this, will code this later
+   }
+   elsif ( $ThisLine =~ /%SEC-6-IPACCESSLOG(|D|N)P/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*SEC-6-IPACCESSLOG(|D|N)P: list //;
+      $testline =~ s/ ->//;
+      $testline =~ s/, / /;
+      $testline =~ s/ packets//;
+      $testline =~ s/ packet//;
+      @testfields = split(/ /,$testline);
+      $accesslist = @testfields[0];
+      $action = @testfields[1];
+      $protocol = @testfields[2];
+      if ($protocol =~ /(tcp|udp)/) {
+         $source = @testfields[3];
+         $destination = @testfields[4];
+         $icmp_type = "";
+         $count = @testfields[5];
+         @sfields = split(/\(/, $source);
+         $source_ip = @sfields[0];
+         $source_port = @sfields[1];
+         $source_port =~ s/\)//;
+         @dfields = split(/\(/, $destination);
+         $destination_ip = @dfields[0];
+         $destination_port = @dfields[1];
+         $destination_port =~ s/\)//;
+      } elsif ($protocol =~ /icmp/) {
+         $source_ip = @testfields[3];
+         $source_port = 0;
+         $destination_ip = @testfields[4];
+         $destination_port = 0;
+         $icmp_type = @testfields[5];
+         $count = @testfields[6];
+      } elsif ($protocol =~ /41/) {
+         $source_ip = @testfields[3];
+         $source_port = 0;
+         $destination_ip = @testfields[4];
+         $destination_port = 0;
+         $icmp_type = "";
+         $count = @testfields[5];
+      } else {
+         $count = 0;
+      }
+
+      $ACL{$accesslist} += $count;
+      $ACTION{$action} += $count;
+      $packets += $count;
+      if ( ($destination_port == 22) and ($protocol =~ /tcp/) ) {
+         $SSH{$source_ip} += $count;
+         $SSH_packets += $count;
+      }
+   }
+   elsif ( $ThisLine =~ /%IPV6-6-ACCESSLOG(|D|N)P/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*IPV6-6-ACCESSLOG(|D|N)P: list //;
+      $testline =~ s/ ->//;
+      $testline =~ s/, / /;
+      $testline =~ s/ packets//;
+      $testline =~ s/ packet//;
+      @testfields = split(/ /,$testline);
+      $accesslist = @testfields[0];
+      $action = @testfields[1];
+      $protocol = @testfields[2];
+      if ($protocol =~ /(tcp|udp)/) {
+         $source = @testfields[3];
+         $destination = @testfields[4];
+         $icmp_type = "";
+         $count = @testfields[5];
+         @sfields = split(/\(/, $source);
+         $source_ip = @sfields[0];
+         $source_port = @sfields[1];
+         $source_port =~ s/\)//;
+         @dfields = split(/\(/, $destination);
+         $destination_ip = @dfields[0];
+         $destination_port = @dfields[1];
+         $destination_port =~ s/\)//;
+      } elsif ($protocol =~ /icmpv6/) {
+         $source_ip = @testfields[3];
+         $source_port = 0;
+         $destination_ip = @testfields[4];
+         $destination_port = 0;
+         $icmp_type = @testfields[5];
+         $count = @testfields[6];
+      } else {
+         $count = 0;
+      }
+
+      $ACL{$accesslist} += $count;
+      $ACTION{$action} += $count;
+      $IPV6_packets += $count;
+      if ( ($destination_port == 22) and ($protocol =~ /tcp/) ) {
+         $SSH{$source_ip} += $count;
+         $SSH_packets += $count;
+      }
+   }
+   elsif ( ($protocol,$source,$destination) = ($ThisLine =~ /%FW-6-DROP_PKT: Dropping (\S+) pkt (\S+) => (\S+)/) ) {
+      @sfields = split(/:/, $source);
+      $source_ip = @sfields[0];
+      $source_port = @sfields[1];
+      @dfields = split(/:/, $destination);
+      $destination_ip = @dfields[0];
+      $destination_port = @dfields[1];
+      if ($source_port == 25) {
+         $dropsmtphost{$destination_ip}++;
+         $dropsmtppkts++;
+      }
+      if ($destination_port == 25) {
+         $dropsmtphost{$source_ip}++;
+         $dropsmtppkts++;
+      }
+      if ($source_port == 80) {
+         $drophttphost{$source_ip}++;
+         $drophttppkts++;
+      }
+      if ($destination_port == 80) {
+         $drophttphost{$destination_ip}++;
+         $drophttppkts++;
+      }
+      $InspectDrop++;
+   }
+   elsif ( ($ACL,$source,$count) = ($ThisLine =~ /SEC-6-IPACCESSLOGSP: list (.*) denied igmp (.*) -> 224.0.0.1 \(17\), (.*) packet(|s)/) ) {
+      $dropigmp{$host}{$ACL}{$source} += $count;
+   }
+   elsif ($ThisLine =~ /%FW-3-HTTP_JAVA_BLOCK/) {
+      $JavaBlock++;
+   }
+   elsif ( ($username,$vty,$address) = ($ThisLine =~ /%SYS-5-CONFIG_I: Configured from console by (\S+) on (\S+) \((\S+)\)/) ) {
+      $Configured{$host}{"Configured from $vty by $username at ".LookupIP($address)}++;
+   }
+   elsif ( ($username,$vty) = ($ThisLine =~ /%SYS-5-CONFIG_I: Configured from console by (\S+) on (\S+)/) ) {
+      $Configured{$host}{"Configured from $vty by $username"}++;
+   }
+   elsif ( ($username,$vty) = ($ThisLine =~ /%SYS-5-CONFIG_I: Configured from console by (\S+) \((\S+)\)/) ) {
+      $Configured{$host}{"Configured from ".LookupIP($vty)." by $username"}++;
+   }
+   elsif ( ($file,$vty) = ($ThisLine =~ /%SYS-5-CONFIG_I: Configured from (\S+) by (console)/) ) {
+      $Configured{$host}{"Configured from ".$vty." using $file"}++;
+   }
+   elsif ( ($unmatched) = ($ThisLine =~ /%SYS-5-CONFIG_I: (.+)/) ) {
+      $Configured{$host}{"UNMATCHED: $unmatched"}++;
+   }
+   elsif ( ($unmatched) = ($ThisLine =~ /%AUDIT-5-RUN_CONFIG/) ) {
+      $ConfigChange{$host}++;
+   }
+   elsif ( ($HASH) = ($ThisLine =~ /%AUDIT-5-STARTUP_CONFIG: Startup Configuration changed. Hash:\s(^\s)/) ) {
+      $StartConfigChange{host}++;
+   }
+   elsif ( ($interface,$errortype,$withwho) = ($ThisLine =~ /duplex mismatch discovered on (.+) \(.*\), with (.*)/) ) {
+      $DuplexMismatched{$host}{$interface." with ".$errortype}++;
+   }
+   elsif ( ($interface,$vlan_number,$withwho) = ($ThisLine =~ /Native VLAN mismatch discovered on (.+) \(([^ ]+)\), with ([^ ]+)/) ) {
+      $VLANMismatched{$host}{$interface." vlan ".$vlan_number}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /NVLANMISMATCH:Native vlan mismatch detected on port (.*)/) ) {
+      $VLANMismatched{$host}{$interface}++;
+   }
+   elsif ( ($interface,$state) = ($ThisLine =~ /Line protocol on Interface (.+), changed state to (.*)/) ) {
+      $LineProtocolInterfaceState{$host}{$interface." ".$state}++;
+   }
+   elsif ( ($interface,$state) = ($ThisLine =~ /Interface (.+), changed state to (.*)/) ) {
+      $InterfaceState{$host}{$interface." ".$state}++;
+   }
+   elsif ( ($interface_experiencing_error) = ($ThisLine =~ /ERROR: (.*) is experiencing errors/) ) {
+      $InterfaceError{$host}{$interface_experiencing_error}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /DUPLEXMISMATCH:Full\/half duplex mismatch detected on port (.*)/) ) {
+      $DuplexMismatched{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /ETHCNTR-3-HALF_DUX_COLLISION_EXCEED_THRESHOLD: (.*)/) ) {
+      $DuplexMismatched{$host}{$interface}++;
+   }
+   elsif ( ($interface,$state,$destination_port) = ($ThisLine =~ /PORTFROMSTP:Port (.+) (.+) bridge port (.*)/) ) {
+      $PortStateBridge{$host}{$interface." ".$state." ".$destination_port}++;
+   }
+   elsif ( ($interface,$state,$destination_port) = ($ThisLine =~ /PORTTOSTP:Port (.+) (.+) bridge port (.*)/) ) {
+      $PortStateBridge{$host}{$interface." ".$state." ".$destination_port}++;
+   }
+   elsif ( ($Unit) = ($ThisLine =~ /Unit (.*), excessive modem control changes/) ) {
+    $ModemChange{$host}{$Unit}++;
+   }
+   elsif ( ($ThisLine =~ /Compiled/) ) {
+      $Started{$host}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RELOAD: (.*)/) ) {
+      $ReloadRequested{$host}{$message}++;
+   }
+   elsif ( ($message) = ($ThisLine =~ /RESTART: (.*)/) ) {
+      $Restarted{$host}{$message}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /LOSTCARR: (.*)/) ) {
+      $LostCarrier{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /DUPADDR: (.*)/) ) {
+      $DuplicateAddress{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /TRUNKPORTON:Port (.*)/) ) {
+      $TRUNKPORTON{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /TRUNKPORTOFF:Port (.*)/) ) {
+      $TRUNKPORTOFF{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-3-PORT_IN_ERRORS:(.*)/) ) {
+      $PORT_IN_ERRORS{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-5-PORT_SSUPOK:(.*)/) ) {
+      $PORT_SSUPOK{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /EXCESSCOLL: (.*)/) ) {
+      $ExcessiveCollision{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /LATECOLL: (.*)/) ) {
+      $LateCollision{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /UNDERFLO: (.*)/) ) {
+      $Underflow{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /P2_WARN: (.*)/) ) {
+      $InvalidMulticast{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /LINK_FLAP: (.*)/) ) {
+      $Flapping{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /ERR_DISABLE: (.*)/) ) {
+      $Flapping{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /LOGIN_FAIL:User (.*)/) ) {
+      $LoginFail{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /RSHPORTATTEMPT: (.*)/) ) {
+      $RSHELLFail{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SPANTREE.+: (.*)/) ) {
+      $SpantreeFailure{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /DHCPD-4-DECLINE_CONFLICT: (.*)/) ) {
+      $DHCPConflict{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /DHCPD-4-PING_CONFLICT: (.*)/) ) {
+      $DHCPPingConflict{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /AAAA-4-SERVUNDEF: (.*)/) ) {
+      $AAAServerUndef{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /AAAA-3-BADREG: (.*)/) ) {
+      $AAABadReg{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /MGMT-5-NVRAM_MINDOWN: (.*)/) ) {
+      $MgmtResetMindown{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /RUNCFGSYNC-6-SYNCEVENT: (.*)/) ) {
+      $RUNCFGEnabled{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /RSP-3-SLAVECHANGE: (.*)/) ) {
+      $RSPSlaveChange{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /RSP-3-SLAVEUP: (.*)/) ) {
+      $RSPSlaveUp{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /RSP-3-SLAVEDOWN: (.*)/) ) {
+      $RSPSlaveDown{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /MLS-5-MLSENABLED: (.*)/) ) {
+      $MLSMultiLayerEnabled{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /MLS-5-MLSDISABLED: (.*)/) ) {
+      $MLSMultiLayerDisabled{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /MLS-5-MCAST_STATUS: (.*)/) ) {
+      $MLSMcastStatus{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /MLS-5-NDEENABLED: (.*)/) ) {
+      $MLSNetflowEnabled{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /MLS-5-NDEDISABLED: (.*)/) ) {
+      $MLSNetflowDisabled{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /MLS-5-FLOWMASKCHANGE: (.*)/) ) {
+      $MLSFlowmaskChanged{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-4-P2_WARN: (.*)/) ) {
+      $SYSWarn{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-3-CPUHOG: (.*)/) ) {
+      $SYSCpuHog{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-5-MOD_PWRON:Module (.+) (.*)/) ) {
+      $SYSModulePowerOn{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-1-SYS_ENABLEPS: (.*)/) ) {
+      $SYSModulePowerSupplyUp{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-5-MOD_OK:Module (.+) (.*)/) ) {
+      $SYSModuleOk{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-5-MOD_INSERT:Module (.+) (.*)/) ) {
+      $SYSModuleInserted{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-3-MOD_MINORFAIL:Module (.+) (.*)/) ) {
+      $SYSModuleMinorFail{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-5-MOD_RESET:Module (.+) (.*)/) ) {
+      $SYSModuleReset{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-5-SUP_MODSBY:(.*)/) ) {
+      $SYSModuleStandby{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-3-SUP_WAITSBYSUPONLINE: (.*)/) ) {
+      $SYSWaitOnline{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-3-SUP_THISSUPRESET: (.*)/) ) {
+      $SYSSupervisorEngineReset{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-5-SUP_IMGSYNCSTART: (.*)/) ) {
+      $SYSImgSyncStart{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-5-SUP_IMGSYNCFINISH: (.*)/) ) {
+      $SYSImgSyncFinished{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SYS-4-SUPERVISOR_ERR:Forwarding engine IP (checksum|length|too short) error counter (.*)/) ) {
+      $SYSSupervisorErr{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /SNMP-5-COLDSTART: (.*)/) ) {
+      $SNMPColdStart{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /COUNTERS: (.*)/) ) {
+      $CountersMsg{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /DOT11-4-MAXRETRIES: Packet to client ....\.....\..... reached(.*)/) ) {
+      $Dot11Retrys{$host}{$interface}++;
+   }
+   elsif ( ($interface,$msg) = ($ThisLine =~ /DOT11-4-MAXRETRIES: Packet to client ....\.....\..... reached(.*)/) ) {
+      $Dot11Retrys{$host}{$interface}++;
+   }
+   elsif ( ($radio,$interface) = ($ThisLine =~ /DOT11-6-ASSOC: Interface (.*), Station +(.*)/) ) {
+      $Dot11Assoc{$host}{"$radio $interface"}++;
+   }
+   elsif ( ($radio,$interface) = ($ThisLine =~ /DOT11-6-DISASSOC: Interface (.*), Deauthenticating Station (.*)/) ) {
+      $Dot11Disassoc{$host}{"$radio $interface"}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /DOT11-6-ROAMED: Station (.*)/) ) {
+      $Dot11Roamed{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /DOT11-4-NO_SSID: (.*)/) ) {
+      $Dot11NoSSID{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /DOT11-6-FREQ_USED: (.*)/) ) {
+      $Dot11FreqUsed{$host}{$interface}++;
+   }
+   elsif ( ($radio,$interface) = ($ThisLine =~ /DOT11-4-LOADING_RADIO: Interface (.*), loading the radio firmware (.*)/) ) {
+      $Dot11LoadingRadio{$host}{"$radio $interface"}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /ICMP Echo Req: (.*)/) ) {
+      $ICMP_Echo_Req{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /ICMP Echo Rply: (.*)/) ) {
+      $ICMP_Echo_Rep{$host}{$interface}++;
+   }
+   elsif ( ($interface) = ($ThisLine =~ /AMDP2_FE-5-COLL: (.*)/) ) {
+      $ExcessiveCollision{$host}{$interface}++;
+   }
+   elsif ( ($hash) = ($ThisLine =~ /AUDIT-5-STARTUP_CONFIG: Startup Configuration changed. Hash: (.*)/) ) {
+      $StartConfigChange{$host}++;
+   }
+   elsif ( ($ntppear) = ($ThisLine =~ /NTP-4-PEERUNREACH: Peer (.*) is unreachable/) ) {
+      $NTPpeerUnreach{$host}{$ntppear}++;
+   }
+   elsif ( ($ntppear) = ($ThisLine =~ /NTP-5-PEERSYNC: NTP synced to peer (.*)/) ) {
+      $NTPpeerSync{$host}{$ntppear}++;
+   }
+   elsif ( ($ntppear) = ($ThisLine =~ /NTP-6-PEERREACH: Peer (.*) is reachable/) ) {
+      $NTPpeerReach{$host}{$ntppear}++;
+   }
+   elsif ( ($count) = ($ThisLine =~ /SEC-6-IPACCESSLOGRL: access-list logging rate-limited or missed (.*) packet(|s)/) ) {
+      $ACLmissed{$host} += $count;
+   }
+   elsif ( $CatchUnknown >= 1 ) {
+      # Report any unmatched entries...
+      chomp $ThisLine;
+      ($msg) = ($ThisLine =~ /(%.*)/);
+      $msg ||= $ThisLine;
+      $OtherList{"$host: $msg"}++;
+   }
+}
+
+if (keys %Started) {
+   print "\nDevice started :\n";
+   foreach $ThisOne (sort keys %Started) {
+      print "   " . $ThisOne . ":\n";
+      print "\t Started: " . $Started{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %Restarted) {
+   print "\nDevice restarted :\n";
+   foreach $ThisOne (sort keys %Restarted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Restarted{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Restarted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ReloadRequested) {
+   print "\nDevice reload requested :\n";
+   foreach $ThisOne (sort keys %ReloadRequested) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$ReloadRequested{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ReloadRequested{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %DuplexMismatched) {
+   print "\nDuplex Mismatch warning:\n";
+   foreach $ThisOne (sort keys %DuplexMismatched) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$DuplexMismatched{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $DuplexMismatched{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %VLANMismatched) {
+   print "\nNative VLAN mismatch warning:\n";
+   foreach $ThisOne (sort keys %VLANMismatched) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$VLANMismatched{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $VLANMismatched{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %TRUNKPORTON) {
+   print "\nPort/Interface trunk on :\n";
+   foreach $ThisOne (sort keys %TRUNKPORTON) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$TRUNKPORTON{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $TRUNKPORTON{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %TRUNKPORTOFF) {
+   print "\nPort/Interface trunk off :\n";
+   foreach $ThisOne (sort keys %TRUNKPORTOFF) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$TRUNKPORTOFF{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $TRUNKPORTOFF{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %PORT_IN_ERRORS) {
+   print "\nPort/Interface in errors :\n";
+   foreach $ThisOne (sort keys %PORT_IN_ERRORS) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$PORT_IN_ERRORS{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $PORT_IN_ERRORS{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %PORT_SSUPOK) {
+   print "\nPort in Standy Mode :\n";
+   foreach $ThisOne (sort keys %PORT_SSUPOK) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$PORT_SSUPOK{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $PORT_SSUPOK{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %PortStateBridge) {
+   print "\nPort/Interface left/joined bridge :\n";
+   foreach $ThisOne (sort keys %PortStateBridge) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$PortStateBridge{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $PortStateBridge{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Flapping) {
+   print "\nPort/Interface Flapping :\n";
+   foreach $ThisOne (sort keys %Flapping) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Flapping{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $Flapping{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %$DuplicateAddress) {
+   print "\nPort/Interface duplicate address :\n";
+   foreach $ThisOne (sort keys %$DuplicateAddress) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$$DuplicateAddress{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DuplicateAddress{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %InvalidMulticast) {
+   print "\nPort/Interface invalid multicast :\n";
+   foreach $ThisOne (sort keys %InvalidMulticast) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$InvalidMulticast{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $InvalidMulticast{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SpantreeFailure) {
+   print "\nPort/Interface spantree failure :\n";
+   foreach $ThisOne (sort keys %SpantreeFailure) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SpantreeFailure{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SpantreeFailure{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ($Detail >= 5 && keys %LineProtocolInterfaceState) {
+   print "\nLine protocol on Port/Interface changed state :\n";
+   foreach $ThisOne (sort keys %LineProtocolInterfaceState) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$LineProtocolInterfaceState{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $LineProtocolInterfaceState{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (( $Detail >= 5 ) and (keys %InterfaceState)) {
+   print "\nPort/Interface state change :\n";
+   foreach $ThisOne (sort keys %InterfaceState) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$InterfaceState{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $InterfaceState{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Underflow) {
+   print "\nPort/Interface transmit error(underflow) :\n";
+   foreach $ThisOne (sort keys %Underflow) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Underflow{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $Underflow{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %LostCarrier) {
+   print "\nPort/Interface transmit error (lost carrier) :\n";
+   foreach $ThisOne (sort keys %LostCarrier) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$LostCarrier{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $LostCarrier{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %LateCollision) {
+   print "\nPort/Interface transmit error (Late collision) :\n";
+   foreach $ThisOne (sort keys %LateCollision) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$LateCollision{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $LateCollision{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ExcessiveCollision) {
+   print "\nPort/Interface Excessive collision :\n";
+   foreach $ThisOne (sort keys %ExcessiveCollision) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$ExcessiveCollision{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $ExcessiveCollision{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %InterfaceError) {
+   print "\nPort/Interface experiencing error :\n";
+   foreach $ThisOne (sort keys %InterfaceError) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$InterfaceError{$ThisOne}}) {
+         print "\tPort or Interface " .$ThatOne . "\t: " . $InterfaceError{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ModemChange) {
+   print "\nExcessive modem control changes:\n";
+   foreach $ThisOne (sort keys %ModemChange) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$ModemChange{$ThisOne}}) {
+         print "\tUnit " .$ThatOne . "\t: " . $ModemChange{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %CountersMsg) {
+   print "\nCounters changes:\n";
+   foreach $ThisOne (sort keys %CountersMsg) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$CountersMsg{$ThisOne}}) {
+         print "\t" .$ThatOne . "\t: " . $CountersMsg{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Configured) {
+   print "\nDevice configured by :\n";
+   foreach $ThisOne (sort keys %Configured) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Configured{$ThisOne}}) {
+         print "\t" .$ThatOne . "\t: " . $Configured{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ConfigChange) {
+   print "\nDevice config changes :\n";
+   foreach $ThisOne (sort keys %ConfigChange) {
+      print "   " . $ThisOne . ": " . $ConfigChange{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %StartConfigChange) {
+   print "\nDevice start config changes :\n";
+   foreach $ThisOne (sort keys %StartConfigChange) {
+      print "   " . $ThisOne . ": " . $StartConfigChange{$ThisOne} . " Time(s)\n";
+   }
+}
+
+
+if (keys %LoginFail) {
+   print "\nLogin failed on device :\n";
+   foreach $ThisOne (sort keys %LoginFail) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$LoginFail{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $LoginFail{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %RSHELLFail) {
+   print "\nRemote Shell Login failed on device :\n";
+   foreach $ThisOne (sort keys %RSHELLFail) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$RSHELLFail{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $RSHELLFail{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %DHCPConflict) {
+   print "\nDHCP Conflict on device :\n";
+   foreach $ThisOne (sort keys %DHCPConflict) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$DHCPConflict{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DHCPConflict{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %DHCPPingConflict) {
+   print "\nDHCP Address Conflict on device :\n";
+   foreach $ThisOne (sort keys %DHCPPingConflict) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$DHCPPingConflict{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $DHCPPingConflict{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %AAAServerUndef) {
+   print "\nAAA Server Undefined on device :\n";
+   foreach $ThisOne (sort keys %AAAServerUndef) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$AAAServerUndef{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $AAAServerUndef{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %AAABadReg) {
+   print "\nAAA Bad Register on device :\n";
+   foreach $ThisOne (sort keys %AAABadReg) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$AAABadReg{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $AAABadReg{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %RUNCFGEnabled) {
+   print "\nHigh-Availability Redundancy Feature is enabled on device :\n";
+   foreach $ThisOne (sort keys %RUNCFGEnabled) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$RUNCFGEnabled{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $RUNCFGEnabled{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %RSPSlaveUp) {
+   print "\nHigh-Availability Redundancy Feature, Card is manually reset, Slave is up  on device :\n";
+   foreach $ThisOne (sort keys %RSPSlaveUp) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$RSPSlaveUp{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $RSPSlaveUp{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %RSPSlaveDown) {
+   print "\nHigh-Availability Redundancy Feature, Card is manually reset, Slave is down  on device :\n";
+   foreach $ThisOne (sort keys %RSPSlaveDown) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$RSPSlaveDown{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $RSPSlaveDown{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %RSPSlaveChange) {
+   print "\nHigh-Availability Redundancy Feature, Card is manually reset, Slave is changinf state on device :\n";
+   foreach $ThisOne (sort keys %RSPSlaveChange) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$RSPSlaveChange{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $RSPSlaveChange{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %MLSFlowmaskChanged) {
+   print "\nFlow Mask Changed on device :\n";
+   foreach $ThisOne (sort keys %MLSFlowmaskChanged) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$MLSFlowmaskChanged{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $MLSFlowmaskChanged{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %MLSMcastStatus) {
+   print "\nIP Multicast status on device :\n";
+   foreach $ThisOne (sort keys %MLSMcastStatus) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$MLSMcastStatus{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $MLSMcastStatus{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %MLSMultiLayerEnabled) {
+   print "\nIP Multilayer switching enabled on device :\n";
+   foreach $ThisOne (sort keys %MLSMultiLayerEnabled) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$MLSMultiLayerEnabled{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $MLSMultiLayerEnabled{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %MLSMultiLayerDisabled) {
+   print "\nIP Multilayer switching disabled on device :\n";
+   foreach $ThisOne (sort keys %MLSMultiLayerDisabled) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$MLSMultiLayerDisabled{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $MLSMultiLayerDisabled{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %MLSNetflowEnabled) {
+   print "\nNetflow enabled on device :\n";
+   foreach $ThisOne (sort keys %MLSNetflowEnabled) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$MLSNetflowEnabled{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $MLSNetflowEnabled{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %MLSNetflowDisabled) {
+   print "\nNetflow disabled on device :\n";
+   foreach $ThisOne (sort keys %MLSNetflowDisabled) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$MLSNetflowDisabled{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $MLSNetflowDisabled{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %MgmtResetMindown) {
+   print "\nReset mindown on device :\n";
+   foreach $ThisOne (sort keys %MgmtResetMindown) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$MgmtResetMindown{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $MgmtResetMindown{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSWarn) {
+   print "\nModule timeout on device :\n";
+   foreach $ThisOne (sort keys %SYSWarn) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSWarn{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSWarn{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSCpuHog) {
+   print "\nCpu Hog on device :\n";
+   foreach $ThisOne (sort keys %SYSCpuHog) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSCpuHog{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSCpuHog{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSModulePowerSupplyUp) {
+   print "\nModule power supply up on device :\n";
+   foreach $ThisOne (sort keys %SYSModulePowerSupplyUp) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSModulePowerSupplyUp{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSModulePowerSupplyUp{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSModulePowerOn) {
+   print "\nModule power up on device :\n";
+   foreach $ThisOne (sort keys %SYSModulePowerOn) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSModulePowerOn{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSModulePowerOn{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSModuleOk) {
+   print "\nModule online on device :\n";
+   foreach $ThisOne (sort keys %SYSModuleOk) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSModuleOk{$ThisOne}}) {
+         print "\t Module " .$ThatOne . "\t: " . $SYSModuleOk{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSModuleInserted) {
+   print "\nModule inserted on device :\n";
+   foreach $ThisOne (sort keys %SYSModuleInserted) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSModuleInserted{$ThisOne}}) {
+         print "\t Module " .$ThatOne . "\t: " . $SYSModuleInserted{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSModuleMinorFail) {
+   print "\nModule minor failure on device :\n";
+   foreach $ThisOne (sort keys %SYSModuleMinorFail) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSModuleMinorFail{$ThisOne}}) {
+         print "\t Module " .$ThatOne . "\t: " . $SYSModuleMinorFail{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSModuleReset) {
+   print "\nModule reset on device :\n";
+   foreach $ThisOne (sort keys %SYSModuleReset) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSModuleReset{$ThisOne}}) {
+         print "\t Module " .$ThatOne . "\t: " . $SYSModuleReset{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSWaitOnline) {
+   print "\nSupervisor engine in the process on beeing online on device :\n";
+   foreach $ThisOne (sort keys %SYSWaitOnline) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSWaitOnline{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSWaitOnline{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSModuleStandby) {
+   print "\nModule standby on device :\n";
+   foreach $ThisOne (sort keys %SYSModuleStandby) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSModuleStandby{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSModuleStandby{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSSupervisorEngineReset) {
+   print "\nSupervisor engine reset on device :\n";
+   foreach $ThisOne (sort keys %SYSSupervisorEngineReset) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSSupervisorEngineReset{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSSupervisorEngineReset{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSImgSyncStart) {
+   print "\nSwitch of supervisor engine started :\n";
+   foreach $ThisOne (sort keys %SYSImgSyncStart) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSImgSyncStart{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSImgSyncStart{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSSupervisorErr) {
+   print "\nForwarding engine IP error :\n";
+   foreach $ThisOne (sort keys %SYSSupervisorErr) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSSupervisorErr{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSSupervisorErr{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SYSImgSyncFinished) {
+   print "\nSwitch of supervisor engine finished :\n";
+   foreach $ThisOne (sort keys %SYSImgSyncFinished) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SYSImgSyncFinished{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SYSImgSyncFinished{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %SNMPColdStart) {
+   print "\nSNMP Cold (Re)start on device :\n";
+   foreach $ThisOne (sort keys %SNMPColdStart) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$SNMPColdStart{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $SNMPColdStart{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Dot11Retrys) {
+   print "\nAccess Point Dot11 Max retries on device :\n";
+   foreach $ThisOne (sort keys %Dot11Retrys) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Dot11Retrys{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Dot11Retrys{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ($Detail >= 5 && keys %Dot11Assoc) {
+   print "\nAccess Point Dot11 associated with device :\n";
+   foreach $ThisOne (sort keys %Dot11Assoc) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Dot11Assoc{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Dot11Assoc{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if ($Detail >= 5 && keys %Dot11Disassoc) {
+   print "\nAccess Point Dot11 disassociated with device :\n";
+   foreach $ThisOne (sort keys %Dot11Disassoc) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Dot11Disassoc{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Dot11Disassoc{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Dot11Roamed) {
+   print "\nAccess Point Dot11 roaming with device :\n";
+   foreach $ThisOne (sort keys %Dot11Roamed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Dot11Roamed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Dot11Roamed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Dot11NoSSID) {
+   print "\nAccess Point Dot11 no SSID with device :\n";
+   foreach $ThisOne (sort keys %Dot11NoSSID) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Dot11NoSSID{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Dot11NoSSID{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Dot11FreqUsed) {
+   print "\nAccess Point Dot11 Frequency selected with device :\n";
+   foreach $ThisOne (sort keys %Dot11FreqUsed) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Dot11FreqUsed{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Dot11FreqUsed{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %Dot11LoadingRadio) {
+   print "\nAccess Point Dot11 Loading Radio firmware with device :\n";
+   foreach $ThisOne (sort keys %Dot11LoadingRadio) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$Dot11LoadingRadio{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $Dot11LoadingRadio{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ICMP_Echo_Req) {
+   print "\nICMP Echo Request on device :\n";
+   foreach $ThisOne (sort keys %ICMP_Echo_Req) {
+   	print "   " . $ThisOne . ":\n";
+   	foreach $ThatOne (sort keys %{$ICMP_Echo_Req{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ICMP_Echo_Req{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPpeerSync) {
+   print "\nNTP peer synced on device :\n";
+   foreach $ThisOne (sort keys %NTPpeerSync) {
+   	print "   " . $ThisOne . ":\n";
+   	foreach $ThatOne (sort keys %{$NTPpeerSync{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPpeerSync{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPpeerReach) {
+   print "\nNTP peer reachable on device :\n";
+   foreach $ThisOne (sort keys %NTPpeerReach) {
+   	print "   " . $ThisOne . ":\n";
+   	foreach $ThatOne (sort keys %{$NTPpeerReach{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPpeerReach{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %NTPpeerUnreach) {
+   print "\nNTP peer unreachable on device :\n";
+   foreach $ThisOne (sort keys %NTPpeerUnreach) {
+   	print "   " . $ThisOne . ":\n";
+   	foreach $ThatOne (sort keys %{$NTPpeerUnreach{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $NTPpeerUnreach{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ACLmissed) {
+   print "\nACL logging missed/rate-limited on device :\n";
+   foreach $ThisOne (sort keys %ACLmissed) {
+   	print "   " . $ThisOne . " : " . $ACLmissed{$ThisOne} . " Time(s)\n";
+   }
+}
+
+if (keys %dropigmp) {
+   print "\nACL IGMP on device :\n";
+   foreach $ThisOne (sort keys %dropigmp) {
+   	print "   " . $ThisOne . ":\n";
+   	foreach $ThatOne (sort keys %{$dropigmp{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t:\n";
+   	   foreach $WhichOne (sort keys %{$dropigmp{$ThisOne}{$ThatOne}}) {
+            print "\t     " .$WhichOne . "\t: " . $dropigmp{$ThisOne}{$ThatOne}{$WhichOne} . " Time(s)\n";
+         }
+      }
+   }
+}
+
+if (keys %ICMP_Echo_Rep) {
+   print "\nICMP Echo Reply on device :\n";
+   foreach $ThisOne (sort keys %ICMP_Echo_Rep) {
+      print "   " . $ThisOne . ":\n";
+      foreach $ThatOne (sort keys %{$ICMP_Echo_Rep{$ThisOne}}) {
+         print "\t " .$ThatOne . "\t: " . $ICMP_Echo_Rep{$ThisOne}{$ThatOne} . " Time(s)\n";
+      }
+   }
+}
+
+if (keys %ACL) {
+   print "\nAccess Control Lists:\n";
+   foreach $ThisOne (sort {($a =~/\/(\d+)/)[0] <=> ($b =~ /\/(\d+)/)[0]} keys %ACL) {
+      print "   " . $ThisOne . " : " . $ACL{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $packets . " Hit(s)\n";
+   print "   IPv6 Total : " . $IPV6_packets . " Hit(s)\n";
+}
+
+if (keys %ACTION) {
+   print "\nActions:\n";
+   foreach $ThisOne (sort keys %ACTION) {
+      print "   " . $ThisOne . " : " . $ACTION{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $packets . " Hit(s)\n";
+   print "   IPv6 Total : " . $IPV6_packets . " Hit(s)\n";
+}
+
+if ($InspectDrop > 0) {
+   print "\nInspect rule drops : $InspectDrop\n";
+}
+
+if (keys %dropsmtphost) {
+   print "  SMTP servers:\n";
+   foreach $ThisOne (sort SortIP keys %dropsmtphost) {
+      if ($dropsmtphost{$ThisOne} > 1) {
+         print "   " . $ThisOne . " : " . $dropsmtphost{$ThisOne} . " Drops\n";
+      }
+   }
+   print "   Total : " . $dropsmtppkts . "\n";
+}
+
+if (keys %drophttphost) {
+   print "  HTTP servers:\n";
+   foreach $ThisOne (sort SortIP keys %drophttphost) {
+      if ($drophttphost{$ThisOne} > 1) {
+         print "   " . $ThisOne . " : " . $drophttphost{$ThisOne} . " Drop(s)\n";
+      }
+   }
+   print "   Total : " . $drophttppkts . "\n";
+}
+
+if ($JavaBlock > 0) {
+   print "\nJAVA applet(s) blocked : $JavaBlock\n";
+}
+
+if (keys %SSH) {
+   print "\nSSH access:\n";
+   foreach $ThisOne (sort SortIP keys %SSH) {
+      print "   " . $ThisOne . " : " . $SSH{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $SSH_packets . " Hit(s)\n";
+}
+
+if (keys %OtherList) {
+	print "\n**Unmatched Entries**\n";
+   $lines = 0;
+   $count = 0;
+	foreach $line (sort keys %OtherList) {
+      if ($OtherList{$line} > 1 || $Detail >= 5) {
+         print "   $line: $OtherList{$line} Time(s)\n";
+      }
+      else {
+         $lines++;
+         $count += $OtherList{$line};
+      }
+   }
+   if ($lines) {
+      print "    $count messages from $lines lines suppressed\n";
+   }
+}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

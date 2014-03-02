@@ -1,0 +1,48 @@
+##########################################################################
+# $Id: applystddate,v 1.19 2008/03/24 23:31:27 kirk Exp $
+##########################################################################
+
+########################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':dates';
+
+my $Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+
+$SearchDate = TimeFilter('%b %e %H:%M:%S');
+
+# The date might be "Dec 09", but it needs to be "Dec  9"...
+#$SearchDate =~ s/ 0/  /;
+
+if ( $Debug > 5 ) {
+   print STDERR "DEBUG: Inside ApplyStdDate...\n";
+   print STDERR "DEBUG: Looking For: " . $SearchDate . "\n";
+}
+
+while (defined($ThisLine = <STDIN>)) {
+   if ($ThisLine =~ m/^$SearchDate /o) {
+      print $ThisLine;
+   } elsif ($ThisLine =~ m/(Mon|Tue|Wed|Thu|Fri|Sat|Sun) $SearchDate \d{4}/o) {
+      print $ThisLine;
+   }
+}
+
+# vi: shiftwidth=3 syntax=perl tabstop=3 et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

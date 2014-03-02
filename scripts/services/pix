@@ -1,0 +1,414 @@
+##########################################################################
+# $Id: pix,v 1.4 2008/06/30 23:07:51 kirk Exp $
+##########################################################################
+# $Log: pix,v $
+# Revision 1.4  2008/06/30 23:07:51  kirk
+# fixed copyright holders for files where I know who they should be
+#
+# Revision 1.3  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.2  2007/02/16 03:30:55  bjorn
+# Change to Unix text, without CR/LF, by Ivana Varekova.
+#
+# Revision 1.1  2006/12/20 04:24:07  bjorn
+# New script for cisco pix files, written by Bob Hendry.
+#
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Bob Hendry
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':all';
+##########################################################################
+# Apply date for Cisco PIX
+##########################################################################
+
+use POSIX qw(strftime);
+use Logwatch ':dates';
+
+$SearchDate = TimeFilter('%b %e %H:%M:%S');
+
+$Debug = $ENV{'LOGWATCH_DEBUG'} || 0;
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+
+if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside PIX  Filter \n\n";
+    $DebugCounter = 1;
+}
+
+my ($month,$day,$time,$host,$process,$conn,$msg);
+
+while (defined($ThisLine = <STDIN>)) {
+    if ($ThisLine =~ m/^$SearchDate/o) { # added
+
+    if ( $Debug >= 30 ) {
+        print STDERR "DEBUG($DebugCounter): $ThisLine";
+        $DebugCounter++;
+    }
+
+($month,$day,$time,$host,$process,$conn,$msg)=split(/ +/,$ThisLine,7);
+
+   if ( ($ThisLine =~ /(ISDN-6-.+)/ ) or
+         ($ThisLine =~ /Copyright/ ) or
+         ($ThisLine =~ /Cisco Internetwork Operating System Software/ ) or
+         ($ThisLine =~ /IOS \(tm\)/ ) or
+         ($ThisLine =~ /TAC:Home:SW:IOS:Specials/ )
+    ) {
+      # don't care about this, will code this later
+   }
+
+   elsif ( $ThisLine =~ /%PIX-4-106023:/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*PIX-4-106023: Deny //;
+      $testline =~ s/\[0x0, 0x0\]//;
+      $testline =~ s/"/ /g;
+      $testline =~ s/by access-group//;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      @testfields = split(' ',$testline);
+      $accesslist = @testfields[$#testfields];
+      $action = "Deny";
+      $protocol = @testfields[0];
+      if ($protocol =~ /(tcp|udp)/) {
+         $source = @testfields[3];
+         $destination = @testfields[7];
+         $icmp_type = "";
+         $count = 1;
+         $source_ip = @testfields[3];
+         $source_port = @testfields[4];
+         $destination_ip = @testfields[7];
+         $destination_port = @dfields[8];
+      } elsif ($protocol =~ /icmp/) {
+         $source = @testfields[3];
+         $destination = @testfields[7];
+         $icmp_type = @testfields[8];
+         $count = 1;
+         $source_ip = @testfields[3];
+         $destination_ip = @testfields[7];
+      } elsif ($protocol =~ /41/) { #IPv6
+         $source = @testfields[3];
+         $destination = @testfields[7];
+         $icmp_type = "";
+         $count = 1;
+         $source_ip = @testfields[3];
+         $source_port = @testfields[4];
+         $destination_ip = @testfields[7];
+         $destination_port = @dfields[8];
+      } else {
+         $count = 0;
+      }
+      $ACL{$accesslist} += $count;
+      $ACTION{$action} += $count;
+      $packets += $count;
+      if ( ($destination_port == 22) and ($protocol =~ /TCP|tcp/) ) {
+         $SSH{$source_ip} += $count;
+         $SSH_packets += $count;
+      }
+      if ( ($destination_port == 23) and ($protocol =~ /TCP|tcp/) ) {
+         $TELNET{$source_ip} += $count;
+         $TELNET_packets += $count;
+      }
+   }
+   elsif ($ThisLine =~ /%PIX-6-106100:/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*%PIX-6-106100://;
+      $testline =~ s/ ->//;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      $testline =~ s/[()]/ /g;
+      @testfields = split(' ',$testline);
+      $accesslist = @testfields[1];
+      $action = @testfields[2];
+      $protocol = @testfields[3];
+      if ($protocol =~ /(TCP|UDP|tcp|udp)/) {
+         $count = 1;
+         $source_ip = @testfields[5];
+         $source_port = @testfields[6];
+         $destination_ip = @testfields[8];
+         $destination_port = @testfields[9];
+      } elsif ($protocol =~ /icmpv6/) {
+         # not implemented
+      } else {
+         $count = 0;
+      }
+      $ACL{$accesslist} += $count;
+      $ACTION{$action} += $count;
+      $packets += $count;
+      if ( ($destination_port == 22) and ($protocol =~ /TCP|tcp/) ) {
+         $SSH{$source_ip} += $count;
+         $SSH_packets += $count;
+      }
+      if ( ($destination_port == 23) and ($protocol =~ /TCP|tcp/) ) {
+         $TELNET{$source_ip} += $count;
+         $TELNET_packets += $count;
+      }
+      if ( ($destination_port == 21) and ($protocol =~ /TCP|tcp/) ) {
+         $FTP{$source_ip} += $count;
+         $FTP_packets += $count;
+      }
+  }
+#Error Message %PIX|ASA-6-302013
+   elsif ($ThisLine =~ /%PIX-6-302013: Built/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*%PIX-6-302013: Built//;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      $testline =~ s/[()]/ /g;
+      @testfields = split(' ',$testline);
+      $connection_id = @testfields[3];
+      $CONNECTION_ID{$connection_id} = $connection_id;
+   }
+#Error Message %PIX|ASA-6-302015
+   elsif ($ThisLine =~ /%PIX-6-302015: Built/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*%PIX-6-302015: Built//;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      $testline =~ s/[()]/ /g;
+      @testfields = split(' ',$testline);
+      $connection_id = @testfields[3];
+      $CONNECTION_ID{$connection_id} = $connection_id;
+  }
+
+#Error Message %PIX|ASA-6-302014
+   elsif ($ThisLine =~ /%PIX-6-302014: Teardown/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*%PIX-6-302014: Teardown//;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      $testline =~ s/[()]/ /g;
+      @testfields = split(' ',$testline);
+      $protocol = @testfields[0];
+      $connection_id = @testfields[2];
+      $count = 1;
+      $source_ip = @testfields[5];
+      $source_port = @testfields[6];
+      $destination_ip = @testfields[11];
+      $destination_port = @testfields[12];
+
+      if ($connection_id == $CONNECTION_ID{$connection_id}) {
+         if ( ($destination_port == 21) and ($protocol =~ /TCP|tcp/) ) {
+            $FTP{$source_ip} += $count;
+            $FTP_packets += $count;
+            }
+         if ( ($destination_port == 22) and ($protocol =~ /TCP|tcp/) ) {
+            $SSH{$source_ip} += $count;
+            $SSH_packets += $count;
+            }
+         if ( ($destination_port == 23) and ($protocol =~ /TCP|tcp/) ) {
+            $TELNET{$source_ip} += $count;
+            $TELNET_packets += $count;
+            }
+
+         }
+   }
+#Error Message %PIX|ASA-6-302016
+   elsif ($ThisLine =~ /%PIX-6-302016: Teardown/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*%PIX-6-302016: Teardown//;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      $testline =~ s/[()]/ /g;
+      @testfields = split(' ',$testline);
+      $protocol = @testfields[0];
+      $connection_id = @testfields[2];
+      $count = 1;
+      $source_ip = @testfields[5];
+      $source_port = @testfields[6];
+      $destination_ip = @testfields[11];
+      $destination_port = @testfields[12];
+
+      if ($connection_id == $CONNECTION_ID{$connection_id}) {
+
+         if ( ($source_port == 53) and ($protocol =~ /UDP|udp/) ) {
+            $DNS{$source_ip} += $count;
+            $DNS_packets += $count;
+         }
+         if ( ($source_port == 123) and ($protocol =~ /UDP|udp/) ) {
+            $NTP{$source_ip} += $count;
+            $NTP_packets += $count;
+         }
+         if ( ($source_port == 514) and ($protocol =~ /UDP|udp/) ) {
+            $SYSLOG{$source_ip} += $count;
+            $SYSLOG_packets += $count;
+         }
+      }
+   }
+   elsif ( $ThisLine =~ /%PIX-3-710003:/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*%PIX-3-710003://;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      @testfields = split(' ',$testline);
+      $accesslist = @testfields[4];
+      $action = "denied";
+      $protocol = @testfields[0];
+      if ($protocol =~ /(TCP|UDP|tcp|udp)/) {
+         $icmp_type = "";
+         $count = 1;
+         $source_ip = @testfields[6];
+         $source_port = @testfields[7];
+         $destination_ip = @testfields[10];
+         $destination_port = @testfields[11];
+      } elsif ($protocol =~ /icmpv6/) {
+         $source_ip = @testfields[3];
+         $source_port = 0;
+         $destination_ip = @testfields[4];
+         $destination_port = 0;
+         $icmp_type = @testfields[5];
+         $count = @testfields[6];
+      } else {
+         $count = 0;
+      }
+      $ACL{$accesslist} += $count;
+      $ACTION{$action} += $count;
+      $packets += $count;
+      if ( ($destination_port == 22) and ($protocol =~ /TCP|tcp/) ) {
+         $SSH{$source_ip} += $count;
+         $SSH_packets += $count;
+      }
+   }#Error Message %PIX|ASA-6-302020
+   elsif ($ThisLine =~ /%PIX-6-302020: Built ICMP connection for faddr/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*%PIX-6-302020: Built ICMP connection for faddr//;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      $testline =~ s/[()]/ /g;
+      @testfields = split(' ',$testline);
+      $connection_id = @testfields[0];
+      $CONNECTION_ID{$connection_id} = $connection_id;
+  }
+
+#Error Message %PIX|ASA-6-302021
+   elsif ($ThisLine =~ /%PIX-6-302021: Teardown ICMP connection for faddr/) {
+      $testline = $ThisLine;
+      chomp $testline;
+      $testline =~ s/^.*%PIX-6-302021: Teardown ICMP connection for faddr//;
+      $testline =~ s/[:,]/ /g;
+      $testline =~ s/\// /g;
+      $testline =~ s/[()]/ /g;
+      @testfields = split(' ',$testline);
+      $connection_id = @testfields[0];
+      $count = 1;
+      $source_ip = $connection_id;
+
+      if ($connection_id == $CONNECTION_ID{$connection_id}) {
+            $ICMP{$source_ip} += $count;
+            $ICMP_packets += $count;
+      }
+   }
+   else {
+      # Report any unmatched entries...
+	  chomp $ThisLine;
+	  $OtherList{$ThisLine}++;
+   }
+ }
+}
+if (keys %ACL) {
+   print "\nAccess Control Lists:\n";
+   foreach $ThisOne (sort keys %ACL) {
+      print "   " . $ThisOne . " : " . $ACL{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $packets . " Hit(s)\n";
+   if ($IPV6_packets >0) {print "   IPv6 Total : " . $IPV6_packets . " Hit(s)\n"}
+}
+
+if (keys %ACTION) {
+   print "\nActions:\n";
+   foreach $ThisOne (sort keys %ACTION) {
+      print "   " . $ThisOne . " : " . $ACTION{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $packets . " Hit(s)\n";
+   if ($IPV6_packets >0) {print "   IPv6 Total : " . $IPV6_packets . " Hit(s)\n"}
+}
+if (keys %ICMP) {
+   print "\nICMP Requests:\n";
+   foreach $ThisOne (sort keys %ICMP) {
+      print "   " . $ThisOne . " : " . $ICMP{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $ICMP_packets . " Hit(s)\n";
+}
+
+if (keys %SSH) {
+   print "\nSSH access:\n";
+   foreach $ThisOne (sort keys %SSH) {
+      print "   " . $ThisOne . " : " . $SSH{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $SSH_packets . " Hit(s)\n";
+}
+
+if (keys %TELNET) {
+   print "\nTELNET access:\n";
+   foreach $ThisOne (sort keys %TELNET) {
+      print "   " . $ThisOne . " : " . $TELNET{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $TELNET_packets . " Hit(s)\n";
+}
+
+if (keys %FTP) {
+   print "\nFTP access:\n";
+   foreach $ThisOne (sort keys %FTP) {
+      print "   " . $ThisOne . " : " . $FTP{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $FTP_packets . " Hit(s)\n";
+}
+
+if (keys %DNS) {
+   print "\nDNS access:\n";
+   foreach $ThisOne (sort keys %DNS) {
+      print "   " . $ThisOne . " : " . $DNS{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $DNS_packets . " Hit(s)\n";
+}
+if (keys %NTP) {
+   print "\nNTP access:\n";
+   foreach $ThisOne (sort keys %NTP) {
+      print "   " . $ThisOne . " : " . $NTP{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $NTP_packets . " Hit(s)\n";
+}
+if (keys %SYSLOG) {
+   print "\nSYSLOG access:\n";
+   foreach $ThisOne (sort keys %SYSLOG) {
+      print "   " . $ThisOne . " : " . $SYSLOG{$ThisOne} . " Hit(s)\n";
+   }
+   print "   Total : " . $SYSLOG_packets. " Hit(s)\n";
+}
+
+#if (keys %OtherList) {
+#	print "\n**Unmatched Entries**\n";
+#	foreach $line (sort {$OtherList{$b}<=>$OtherList{$a} } keys %OtherList) {
+#	print "   $line: $OtherList{$line} Time(s)\n";
+#    }
+#}
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

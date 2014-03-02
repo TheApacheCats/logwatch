@@ -1,0 +1,383 @@
+##########################################################################
+# $Id: iptables,v 1.9 2009/06/05 14:06:07 mike Exp $
+##########################################################################
+# $Log: iptables,v $
+# Revision 1.9  2009/06/05 14:06:07  mike
+# Added IPF patch from Don Wilder/Mark Dalton -mgt
+#
+# Revision 1.8  2008/03/24 23:31:26  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.7  2007/02/16 03:27:05  bjorn
+# Remove explicit invocation of perl executable, by Ivana Varekova.
+#
+# Revision 1.6  2007/01/29 18:40:29  bjorn
+# Handle timestamp generated in Ubuntu, suggested by MrC.
+#
+# Revision 1.5  2006/08/23 22:47:29  bjorn
+# Corrected icmp type reporting, by Allen Kistler.
+#
+# Revision 1.4  2006/07/11 15:59:56  bjorn
+# Allow sorting by either source or target, by Michel Messerschmidt.
+#
+# Revision 1.3  2006/01/16 18:40:31  kirk
+# fixed name to Logwatch (how I like it now)
+#
+# Revision 1.2  2005/12/06 02:35:43  bjorn
+# Report icmp type properly, by Allen Kistler.
+#
+# Revision 1.1  2005/07/25 22:17:31  bjorn
+# Moved iptables (and ipchains, ipfwadm) code to its own service (iptables).
+#
+##########################################################################
+# iptables, ipchains, and ipfwadm script for Logwatch.
+# Ipfwadm and ipchains are deprecated, but is included
+# here for backwards compatibility.
+#
+# This script was extracted from the kernel script,
+# which processed netfilter (iptables, ipchains, and
+# ipfwadm) statements until kernel script Revision 1.29.
+#
+# Visit the Logwatch website at
+#   http://www.logwatch.org
+##########################################################################
+
+#####################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+use Logwatch ':ip';
+
+$Detail = $ENV{'LOGWATCH_DETAIL_LEVEL'} || 0;
+$MinFilter = $ENV{'iptables_host_min_count'} || 0;
+$DoLookup = $ENV{'iptables_ip_lookup'}; $DoLookup = $DoLookup; # keep -w happy
+$ListByHost = $ENV{'iptables_list_by_host'} || 0;
+$ListByService = $ENV{'iptables_list_by_service'} || 0;
+# Keep old behaviour if nothing is configured
+$ListByHost = 1 unless ($ListByService);
+$MaxFlood = 10;
+$MaxNum =0;
+
+sub lookupService {
+   my ($port, $proto, $service);
+   ($port, $proto) = ($_[0], $_[1]);
+   if ($service = getservbyport ($port, $proto)) {
+      return($service);
+   } else {
+      return($port);
+   }
+}
+
+sub lookupProtocol {
+   my ($proto, $name);
+   $proto = $_[0];
+   if ($name = getprotobynumber ($proto)) {
+      return($name);
+   } else {
+      return($proto);
+   }
+}
+
+sub lookupAction {
+   my ($chain, $actionType);
+   $chain = $_[0];
+
+   # choose an action type
+   if ( $chain =~ /reject/i ) {
+      $actionType = "Rejected";
+   } elsif ( $chain =~ /drop/i ) {
+      $actionType = "Dropped";
+   } elsif ( $chain =~ /deny/i ) {
+      $actionType = "Denied";
+   } elsif ( $chain =~ /denied/i ) {
+      $actionType = "Denied";
+   } elsif ( $chain =~ /accept/i ) {
+      $actionType = "Accepted";
+   } else {
+      $actionType = "Logged";
+   }
+
+   return $actionType;
+}
+
+# SORT COMPARISONS
+sub compStr {
+   return $a cmp $b;
+}
+
+sub compNum {
+   return $a <=> $b;
+}
+
+while (defined($ThisLine = <STDIN>)) {
+   chomp($ThisLine);
+   next if ($ThisLine eq '');
+
+   # the format for ulogd/ulogd.syslogmenu and messages differ in that
+   # the earlier has no service name after the date.  So RemoveHeaders
+   # doesn't work.  Therefore, we extract it here:
+   $ThisLine =~ s/^... .. ..:..:.. ([^ ]*) (kernel: )?(\[\d+\.\d+\] )?//;
+
+   # IPCHAINS
+   if( ($TU,$from,$port,$on) = ( $ThisLine =~ /IP fw-in deny \w+ (\w+) ([^:]+):\d+ ([^:]+):(\d+) / ) ){
+      if($MaxNum < ++$TCPscan{$TU}{$from}) {
+         $MaxNum = $TCPscan{$TU}{$from}
+      }
+      $port=0;
+   } elsif ( ($chain,$action,$if,$proto,$fromip,$toip,$toport) = ( $ThisLine =~ /^Packet log: ([^ ]+) (\w+) (\w+) PROTO=(\d+) ([\d|\.]+):\d+ ([\d|\.]+):(\d+)/ ) ) {
+      $actionType = lookupAction($action);
+      $ipt{$actionType}{$if}{$fromip}{$toip}{$toport}{$proto}{"$chain,$if"}++;
+      $ipt2{$actionType}{$if}{$toport}{$proto}{$fromip}{$toip}{"$chain,$if"}++;
+   }
+   # IPTABLES
+   elsif (($chain,$ifin,$ifout,$fromip,$toip,$proto,$rest) = ($ThisLine =~ /^(.*?)\s*IN=([\w\.]*).*?OUT=([\w\.]*).*?SRC=([\w\.:]+).*?DST=([\w\.:]+).*?PROTO=(\w+)(.*)/ )) {
+
+      # get a destination port number  (or icmp type) if there is one
+      if (! ( ($toport) = ( $rest =~ /TYPE=(\w+)/ ) ) ) {
+         if (! ( ($toport) = ( $rest =~ /DPT=(\w+)/ ) ) ) {
+            $toport = 0;
+         }
+      }
+
+      # get the action type
+      $actionType = lookupAction($chain);
+
+      # determine the dominant interface
+      if ($ifin  =~ /\w+/ && $ifout  =~ /\w+/) {
+         $interface = $ifin;
+      } elsif ($ifin =~ /\w+/) {
+         $interface = $ifin;
+         $ifout = "none";
+      } else {
+         $interface = $ifout;
+         $ifin = "none";
+      }
+
+      if ($chain eq "") {
+         $chain_info = "";
+      } else {
+         $chain_info = "(" . $chain . ") ";
+      }
+
+      # add the packet
+#      $ipt{$actionType}{$interface}{$fromip}{$toip}{$toport}{$proto}{"$chain,$ifin,$ifout"}++;
+      $ipt{$actionType}{$interface}{$fromip}{$toip}{$toport}{$proto}{$chain_info}++;
+      $ipt2{$actionType}{$interface}{$toport}{$proto}{$fromip}{$toip}{$chain_info}++;
+   }
+   # IPF
+   elsif (($repcnt,$if,$chain,$fromip,$fromport,$toip,$toport,$proto,$rest,$inout) = ($ThisLine =~ /^.*\d{2,2}:\d{2,2}:\d{2,2}\.\d{6,6}\s*(?:(\d{1,})x)*\s*(\w*)\s*@[-]*\d{1,}:[-]*\d{1,}\s*(\w*)\s*([\w\.:]+\w),*(\d*)\s*->\s*([\w\.:]+\w),*(\d*)\s*PR\s*(\w*)\s*(.*((IN|OUT)).*)/)) {
+      if ($chain eq 'b') {
+          $actionType = "drop";
+      } elsif ($chain eq 'p') {
+          $actionType = "accept";
+      }
+      if ($repcnt eq '') {
+         $repcnt = 1;
+      }
+      while ($repcnt >= 1) {
+        $ipt{$actionType}{$if}{$fromip}{$toip}{$toport}{$proto}{"$actionType,$if"}++;
+        $ipt2{$actionType}{$if}{$toport}{$proto}{$fromip}{$toip}{"$actionType,$if"}++;
+        $repcnt = $repcnt - 1;
+      }
+   }
+}
+
+# IPCHAINS
+if (keys %TCPscan and $MaxNum>$MaxFlood) {
+   print "\nWarning: ipfwadm scan detected on:\n";
+   foreach $ThisOne (sort compStr keys %TCPscan) {
+      print "   " . $ThisOne . " from:\n";
+      foreach $Next (sort compStr keys %{$TCPscan{$ThisOne}}) {
+         $TCPscan{$ThisOne}{$Next}>$MaxFlood &&
+            print "      " . LookupIP($Next). ": $TCPscan{$ThisOne}{$Next} Time(s)\n";
+      }
+   }
+}
+
+
+if ((keys %ipt2) and $ListByService) {
+   foreach my $actionType (sort compStr keys %ipt2) {
+      foreach my $interface (sort compStr keys %{$ipt2{$actionType}}) {
+         my $outputMain = '';
+         my $interfaceCount = 0;
+         foreach my $toport (sort compNum keys %{$ipt2{$actionType}{$interface}}) {
+            foreach my $proto (sort compStr keys %{$ipt2{$actionType}{$interface}{$toport}}) {
+               my $outputSection = '';
+               my $portCount = 0;
+               my $hostCount = 0;
+               undef %hostList;
+               my %host_list = ();
+               my $protocol;
+               # determine the protocol
+               if ( $proto =~ /^\d+$/ ) {
+                  $protocol = lookupProtocol($proto);
+               } else {
+                  $protocol = lc($proto);
+               }
+
+               # determine the name of the service
+               my $service = lookupService($toport,$protocol);
+
+               foreach my $fromip (sort SortIP keys %{$ipt2{$actionType}{$interface}{$toport}{$proto}}) {
+                  my $fromHostCount = 0;
+                  my $from = LookupIP($fromip);
+                  my $outputDetails = "";
+                  foreach my $toip (sort SortIP keys %{$ipt2{$actionType}{$interface}{$toport}{$proto}{$fromip}}) {
+                     my $toHostCount = 0;
+                     my $to = LookupIP($toip);
+
+                     foreach my $details (sort keys %{$ipt2{$actionType}{$interface}{$toport}{$proto}{$fromip}{$toip}}) {
+                        my $packetCount = $ipt2{$actionType}{$interface}{$toport}{$proto}{$fromip}{$toip}{$details};
+                        $toHostCount += $packetCount;
+                        if ( $Detail > 9 and ( $outputDetails !~ /\Q$details\E/ ) ) {
+                           $outputDetails .= $details . ", ";
+                        }
+                     }
+                     $fromHostCount += $toHostCount;
+                  }
+                     if ( $Detail > 9 ) {
+                        chop $outputDetails;
+                        chop $outputDetails;
+                        push @{$hostList{"$fromHostCount"}}, $from .
+                             " " . $outputDetails;
+                     } else {
+                        push @{$hostList{"$fromHostCount"}}, $from;
+                     }
+                  $portCount += $fromHostCount;
+                  $hostCount++;
+               }
+
+               $interfaceCount += $portCount;
+               if ($Detail > 5 ) {
+                  $outputMain .= sprintf("   To port %d/%s (%s) - ".
+                                         "%d packet%s from %d host%s\n",
+                                   $toport, $protocol,
+                                   ( $service =~ /^\d+$/ ) ? "?" : $service,
+                                   $portCount, ( $portCount > 1 ) ? "s" : " ",
+                                   $hostCount, ( $hostCount > 1 ) ? "s" : " "
+                                 );
+                  foreach my $hc (sort { $b <=> $a } keys %hostList) {
+                     foreach my $h (@{$hostList{"$hc"}}) {
+                        $outputMain .= sprintf("    %6d packet%s from %s\n",
+                                       $hc, ( $hc > 1 ) ? "s" : " ", $h);
+                     }
+                  }
+               } elsif ($Detail > 3 ) {
+                  my $topHostCount;
+                  ($topHostCount, undef) = sort { $b <=> $a } keys %hostList;
+                  my $topHost = ${$hostList{"$topHostCount"}}[0];
+                  $outputMain .= sprintf( "   To port %5d/%s - %5d packet%s ".
+                                         "from %4d host%s (%d from %s)\n",
+                                   $toport, $protocol, $portCount,
+                                   ( $portCount > 1 ) ? "s" : " ", $hostCount,
+                                   ( $hostCount > 1 ) ? "s" : " ",
+                                   $topHostCount, $topHost
+                                 );
+               } else {
+                  $outputMain .= sprintf("   To port %5d/%s - %5d packet%s ".
+                                         "from %4d host%s\n",
+                                   $toport, $protocol, $portCount,
+                                   ( $portCount > 1 ) ? "s" : " ", $hostCount,
+                                   ( $hostCount > 1 ) ? "s" : " "
+                                 );
+               }
+            }
+         }
+         print "Listed by target ports:";
+         print "\n$actionType $interfaceCount " .
+               ( ( $interfaceCount > 1 ) ? "packets" : "packet" ) .
+               " on interface $interface\n";
+         print $outputMain;
+      }
+   }
+}
+
+
+# IPCHAINS / IPTABLES
+if ((keys %ipt) and $ListByHost) {
+   foreach $actionType (sort compStr keys %ipt) {
+      foreach $interface (sort compStr keys %{$ipt{$actionType}}) {
+         $outputMain = '';
+         $interfaceCount = 0;
+         foreach $fromip (sort SortIP keys %{$ipt{$actionType}{$interface}}) {
+            $outputSection = '';
+            $fromHostCount = 0;
+            $from = LookupIP($fromip);
+            undef %port_list;
+            foreach $toip (sort SortIP keys %{$ipt{$actionType}{$interface}{$fromip}}) {
+               $toHostCount = 0;
+               $to = LookupIP($toip);
+               $outputServices = '';
+               foreach $toport (sort compNum keys %{$ipt{$actionType}{$interface}{$fromip}{$toip}}) {
+                  foreach $proto (sort compStr keys %{$ipt{$actionType}{$interface}{$fromip}{$toip}{$toport}}) {
+                     # determine the protocol
+                     if ( $proto =~ /^\d+$/ ) {
+                        $protocol = lookupProtocol($proto);
+                     } else {
+                        $protocol = lc($proto);
+                     }
+
+                     # determine the name of the service
+                     $service = lookupService($toport,$protocol);
+
+                     foreach $details (sort keys %{$ipt{$actionType}{$interface}{$fromip}{$toip}{$toport}{$proto}}) {
+                        $packetCount = $ipt{$actionType}{$interface}{$fromip}{$toip}{$toport}{$proto}{$details};
+                        $toHostCount += $packetCount;
+                        if ( $Detail > 0 ) {
+                           $outputServices .= "         Service: $service ($protocol/$toport) $details- $packetCount " . ( ( $packetCount > 1 ) ? "packets\n" : "packet\n" );
+                        } else {
+                           ${ $port_list{ $protocol } }{$toport}++;
+                        }
+                     }
+                  }
+               }
+               $fromHostCount += $toHostCount;
+               if ( $Detail > 0 ) { $outputSection .= "      To $to - $toHostCount " . ( ( $toHostCount > 1 ) ? "packets\n" : "packet\n" ); }
+               $outputSection .= $outputServices;
+            }
+            $interfaceCount += $fromHostCount;
+            if ($fromHostCount >= $MinFilter) {
+               if ($Detail > 0 ) {
+                  $outputMain .= "   From $from - $fromHostCount " . ( ( $fromHostCount > 1 ) ? "packets\n" : "packet\n" );
+               } else {
+                  $outputMain .= "  From $from - $fromHostCount " .  ( ($fromHostCount > 1) ? "packets" : "packet" ) .  " to " ;
+                  foreach $protocol ( keys %port_list ) {
+                     if ( $#{ keys %{$port_list { $protocol } } } > 10 ) {
+                        $outputMain .= $#{ $port_list{ $protocol } } ." $protocol ports";
+                     } else {
+                        $outputMain .= "$protocol(" . join(",", sort compNum keys %{ $port_list{ $protocol } } ) . ") " ;
+                     }
+                  }
+                  $outputMain .="\n";
+               }
+            }
+            $outputMain .= $outputSection;
+         }
+         print "\nListed by source hosts:";
+         print "\n$actionType $interfaceCount " . ( ( $interfaceCount > 1 ) ? "packets" : "packet" ) . " on interface $interface\n";
+         print $outputMain;
+      }
+   }
+}
+
+
+exit(0);
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:

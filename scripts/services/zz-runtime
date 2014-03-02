@@ -1,0 +1,44 @@
+##########################################################################
+# $Id: zz-runtime,v 1.3 2008/03/24 23:31:27 kirk Exp $
+##########################################################################
+# $Log: zz-runtime,v $
+# Revision 1.3  2008/03/24 23:31:27  kirk
+# added copyright/license notice to each script
+#
+# Revision 1.2  2007/04/28 23:47:13  bjorn
+# Added show_runtime variable.
+#
+# Revision 1.1  2007/03/17 19:28:42  bjorn
+# Added zz-runtime for runtime statistics.  Currently prints uptime,
+# per Jason Sjobeck's proposal.
+#
+##########################################################################
+
+#######################################################
+## Copyright (c) 2008 Kirk Bauer
+## Covered under the included MIT/X-Consortium License:
+##    http://www.opensource.org/licenses/mit-license.php
+## All modifications and contributions by other persons to
+## this script are assumed to have been donated to the
+## Logwatch project and thus assume the above copyright
+## and licensing terms.  If you want to make contributions
+## under your own copyright or a different license this
+## must be explicitly stated in the contribution an the
+## Logwatch project reserves the right to not accept such
+## contributions.  If you have made significant
+## contributions to this script and want to claim
+## copyright please contact logwatch-devel@lists.sourceforge.net.
+#########################################################
+
+my $uptime=`uptime`;
+my $show_uptime = $ENV{'show_uptime'} || 0;
+if (($ENV{'PRINTING'} eq "y" ) && $show_uptime && $uptime) {
+   print "\nUptime: $uptime\n";
+}
+
+# vi: shiftwidth=3 tabstop=3 syntax=perl et
+# Local Variables:
+# mode: perl
+# perl-indent-level: 3
+# indent-tabs-mode: nil
+# End:
